@@ -1,23 +1,7 @@
-from setuptools import setup, find_packages
+from setuptools import setup
 
-# just a test
-
-setup(
-    name = 'pythfinder',
-    version = '0.0.5.2',
-    license = 'MIT',
-    author = 'Contraș Adrian',
-    author_email = 'omegacoresincai@gmail.com',
-    description = 'Motion Planning library designed for FLL teams',
-    packages = find_packages(),
-    keywords = [
-        'motion-planning',
-        'mobile-robots',
-        'robotics',
-        'first-lego-league',
-        'first-robotics',
-        'fll'
-    ],
-    install_requires = ['pygame>=2.0.0', 'matplotlib>=3.3.0'],
-    include_package_data=True,
-)
+# All packaging metadata lives in pyproject.toml. setuptools reads it and it
+# overrides anything declared here, so declaring it twice only lets the two
+# drift apart - which is exactly how the version numbers came to disagree.
+# This shim exists because the publish workflow calls 'python setup.py sdist'.
+setup()
