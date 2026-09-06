@@ -51,9 +51,13 @@ QUICK_START = os.path.expanduser("~/pythfinder-EV3-quick-start")
 STEPS = 6
 
 # Where the robot starts on the mat, in centimetres from the middle of the
-# field, with the heading in degrees. Drive the robot around the simulator with
-# a controller and read these numbers off the bottom of the window.
-START_POSE = Pose(x = -47, y = 97, head = -45)
+# field, with the heading in degrees. Read these off the bottom RIGHT corner of
+# the simulator window (bottom left is the mouse, and has no heading).
+#
+# +x is UP the screen and +y is to the RIGHT, so head = 0 faces up, 90 faces
+# right, and angles increase counter-clockwise. This pose is the left launch
+# area, facing up the field.
+START_POSE = Pose(x = -46, y = -83, head = 0)
 
 FLL_FIELD = 1   # preset 1 is the FLL field, preset 2 is FTC
 
