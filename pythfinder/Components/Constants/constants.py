@@ -837,6 +837,11 @@ ftc_center_stage_field_image = pygame.image.load(os.path.join(device_relative_pa
 fll_robot_width_cm = 19    # side to side, across the wheels
 fll_robot_length_cm = 14   # front to back
 
+# a top-down photo of the actual robot. The sprite is scaled with its axes
+# transposed and then rotated, which works out to: the FRONT of the robot must
+# point at the LEFT edge of the source image.
+fll_robot_image_source = os.path.join(device_relative_path, 'Robot/fll_robot_team.png')
+
 # center_offset points from the robot's geometric centre to the centre it turns
 # about, in robot coordinates with +x forward. The axle sits 3.5cm from the back
 # of a 14cm robot, so 3.5cm behind the centre.
@@ -874,6 +879,7 @@ default_presets = [["FLL Table",
                                                 axis_color = fll_axis_color,
                                                 text_color = fll_text_color,
                                                 draw_grid = False,
+                                                robot_img_source = fll_robot_image_source,
                                                 robot_width = fll_robot_width_cm,
                                                 robot_height = fll_robot_length_cm,
                                                 constraints2d = Constraints2D(track_width = fll_track_width_cm),
