@@ -848,10 +848,14 @@ fll_center_offset = Point(-3.5, 0)
 fll_track_width_cm = 16
 
 # top speed at full power, in cm/s. This converts a planned speed into a motor
-# power, so if it is wrong every straight comes out the wrong length. Measure it
-# on the robot with measure_max_velocity.py in the quick-start repo - 27.7 is
-# the library default, taken from somebody else's EV3.
-fll_real_max_velocity = 27.7
+# power, so if it is wrong every straight comes out the wrong length. Measured
+# on the robot with measure_max_velocity.py: three runs averaging 64.3 cm/s
+# with a 1.8 cm/s spread, at 8.23V.
+#
+# This is the robot's ceiling, not the speed runs are planned at - that is the
+# linear constraint below, deliberately left lower so the heading PID has power
+# left to correct with.
+fll_real_max_velocity = 64.3
 
 # the BIOGLOW field is a white line drawing, so the FLL preset runs a light theme:
 # a white-on-black interface is unreadable on top of it
