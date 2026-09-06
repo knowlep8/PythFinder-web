@@ -833,6 +833,20 @@ ftc_center_stage_field_image = pygame.image.load(os.path.join(device_relative_pa
 
 
 
+# the team's robot, measured on the build
+fll_robot_width_cm = 19    # side to side, across the wheels
+fll_robot_length_cm = 14   # front to back
+
+# center_offset points from the robot's geometric centre to the centre it turns
+# about, in robot coordinates with +x forward. The axle sits 3.5cm from the back
+# of a 14cm robot, so 3.5cm behind the centre.
+fll_center_offset = Point(-3.5, 0)
+
+# distance between the two drive wheels, centre to centre. NOT the robot's
+# width - measure it. Every turn is scaled by this, so a wrong value makes
+# turns consistently over- or under-shoot.
+fll_track_width_cm = default_track_width
+
 # the BIOGLOW field is a white line drawing, so the FLL preset runs a light theme:
 # a white-on-black interface is unreadable on top of it
 fll_background_color = (240, 240, 240)
@@ -849,7 +863,12 @@ default_presets = [["FLL Table",
                                                 background_color = fll_background_color,
                                                 axis_color = fll_axis_color,
                                                 text_color = fll_text_color,
-                                                draw_grid = False),
+                                                draw_grid = False,
+                                                robot_width = fll_robot_width_cm,
+                                                robot_height = fll_robot_length_cm,
+                                                constraints2d = Constraints2D(track_width = fll_track_width_cm),
+                                                kinematics = TankKinematics(fll_track_width_cm,
+                                                                            center_offset = fll_center_offset)),
                     fll_bioglow_table_image,
                     Size(fll_table_width_cm, fll_table_height_cm),
                     1],
