@@ -51,12 +51,12 @@ class MenuType(Enum):
     OTHER_MENU = [Selected.FIELD_CENTRIC, Selected.ROBOT_BORDER, Selected.SCREEN_BORDER, Selected.HAND_DRAWING,
                   Selected.OTHER_NONE5, Selected.OTHER_NONE6, Selected.OTHER_NONE7, Selected.OTHER_NONE8]
 
-    UNDEFINED = auto()
+    UNDEFINED = []
 
 # inputs with their respective display extension
 class InputType(Enum):
     DIMENSION = ' cm'
     PERCENT = '%'
-    FONT = auto()
-    COLOR = auto()
-    IMAGE_PATH = auto()
+    FONT = ''
+    COLOR = ''
+    IMAGE_PATH = ''

@@ -115,3 +115,23 @@ NOTE: This release is not part of the library, it's external code for EV3 robots
 - updated the FLL robot image with our current design
 - complying with PEP 8 guidelines for better readability and consistency
 - added the DRAW menu with color picker functionality
+
+0.0.5.2 (06.09.2026)
+---------------------
+- updated the FLL field to the 2026-2027 BIOGLOW season (Founders Edition)
+- the FLL preset now uses the official BIOGLOW 'Wireframe & Path Diagram' (page 2) as its
+  field image
+- removed the 2023-2024 MASTERPIECE field image
+- fixed the FLL field scaling: the table size is now measured off the 20cm reference grid in
+  the official wireframe (200.5 x 114.3 cm) instead of the previous 227 x 120 cm estimate,
+  so the field is no longer stretched and simulated centimeters match the real mat
+- added tools/build_field_image.py, which rebuilds the field image from the official PDF
+- the FLL preset now uses a light theme (dark axes, grid and text on a light background),
+  since the white-on-black interface was unreadable over the new white field
+- fixed 'background_color' being ignored: the frame was always cleared with the module
+  default instead of the active constants, so presets could not change the background
+- new 'draw_grid' constant to turn the interface's background grid off; the FLL preset uses it
+- the field image keeps all of the drawing's fine detail: FIRST draws the mission model
+  outlines and launch area markings as 1px lines at ~20% contrast, which averaging down to
+  display size erased. Those lines are now deepened and widened before the image is reduced,
+  and the reduction itself keeps the darkest pixel instead of averaging

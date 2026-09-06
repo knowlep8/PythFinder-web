@@ -62,7 +62,7 @@ class TrajectoryFollower():
 
                 self.sim.manual_control.set(False)
                 self.sim.presets.WRITING.set(False)
-                self.sim.robot.trail.draw_trail.set(True)
+                self.sim.robot.trail.DRAW_TRAIL.set(True)
 
                 self.sim.constants.ERASE_TRAIL.set(False)
                 self.sim.constants.SCREEN_BORDER.set(False)
@@ -72,7 +72,7 @@ class TrajectoryFollower():
             case Auto.EXIT:
                 self.sim.manual_control.set(True)
                 self.sim.presets.WRITING.set(True)
-                self.sim.robot.trail.draw_trail.set(False)
+                self.sim.robot.trail.DRAW_TRAIL.set(False)
 
                 self.sim.constants.ERASE_TRAIL.set(True)
                 self.sim.constants.SCREEN_BORDER.set(True)

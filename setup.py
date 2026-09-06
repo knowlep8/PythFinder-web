@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 
 setup(
     name = 'pythfinder',
-    version = '0.0.5.0',
+    version = '0.0.5.2',
     license = 'MIT',
     author = 'Contraș Adrian',
     author_email = 'omegacoresincai@gmail.com',

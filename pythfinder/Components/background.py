@@ -75,7 +75,8 @@ class Background():
             return Point(point.x, new_y)
 
     def on_screen(self, screen: pygame.Surface):
-        self.__draw_grid(screen)
+        if self.constants.DRAW_GRID.get():
+            self.__draw_grid(screen)
         self.__draw_axis(screen)
         self.__draw_arrows(screen)
         self.__draw_xy(screen)

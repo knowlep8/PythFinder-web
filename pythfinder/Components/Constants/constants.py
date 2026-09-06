@@ -23,8 +23,8 @@ import os
 
 device_relative_path = os.path.join(os.path.dirname(__file__), '..', '..', 'Images')
 
-screenshot_path = os.path.join(device_relative_path, 'Screenshots\\')
-default_robot_image_source = os.path.join(device_relative_path, 'Robot\\fll_robot2.png')
+screenshot_path = os.path.join(device_relative_path, 'Screenshots/')
+default_robot_image_source = os.path.join(device_relative_path, 'Robot/fll_robot2.png')
 
 
 
@@ -40,7 +40,7 @@ default_grid_color = (63, 63, 63) #rgb
 default_background_color = pygame.Color("black")
 
 default_frame_rate = 1000 #fps
-default_system_font = 'graffitiyouthregular'
+default_system_font = 'graffitiyouth'
 default_text_color = pygame.Color("white")
 default_paint_color = pygame.Color("white")
 
@@ -52,6 +52,7 @@ default_fade_percent = 1
 default_use_screen_border = True
 default_field_centric = True
 default_draw_robot_border = False
+default_draw_grid = True
 default_menu_entered = False
 default_head_selection = False
 default_forwards = True
@@ -138,6 +139,7 @@ class Constants():
                  velocity_vector: bool = default_velocity_vector,
                  hand_drawing: bool = default_hand_drawing,
                  drawing_visible: bool = default_drawing_visible,
+                 draw_grid: bool = default_draw_grid,
 
                  screen_size: ScreenSize = ScreenSize(),
                  constraints2d: Constraints2D = Constraints2D(),
@@ -212,6 +214,7 @@ class Constants():
         self.VELOCITY_VECTOR = BooleanEx(velocity_vector)
         self.HAND_DRAWING = BooleanEx(hand_drawing)
         self.DRAWING_VISIBLE = BooleanEx(drawing_visible)
+        self.DRAW_GRID = BooleanEx(draw_grid)
 
     def copy(self):
 
@@ -255,6 +258,7 @@ class Constants():
             self.VELOCITY_VECTOR.get(),
             self.HAND_DRAWING.get(),
             self.DRAWING_VISIBLE.get(),
+            self.DRAW_GRID.get(),
 
             self.screen_size,
             self.constraints,
@@ -356,6 +360,10 @@ class Constants():
             if not self.ROBOT_BORDER.get() == other.ROBOT_BORDER.get():
                 self.ROBOT_BORDER.set(other.ROBOT_BORDER.get())
                 dif +=1
+            if not self.DRAW_GRID.get() == other.DRAW_GRID.get():
+                self.DRAW_GRID.set(other.DRAW_GRID.get())
+                dif += 1
+
             if not self.FIELD_CENTRIC.get() == other.FIELD_CENTRIC.get():
                 self.FIELD_CENTRIC.set(other.FIELD_CENTRIC.get())
                 dif += 1
@@ -797,16 +805,19 @@ img_rectangle_cursor = pygame.transform.scale(img_rectangle_cursor, (32, 32))
 
 
 # FLL
-fll_table_width_cm = 227  # og - 93in
-fll_table_height_cm = 120 # og - 45in
+# no FIRST document states the mat size, so it is measured off the 20cm reference grid
+# in the official wireframe PDF. Re-derive with:
+#   python tools/build_field_image.py --calibrate
+fll_table_width_cm = 200.5
+fll_table_height_cm = 114.3 # lands exactly on the familiar 45in
 
-fll_master_piece_table_source = 'Field\\FLL_table_MP.jpg'
-fll_master_piece_table_image = pygame.image.load(os.path.join(device_relative_path, fll_master_piece_table_source))
+fll_bioglow_table_source = 'Field/FLL_table_BG.png'
+fll_bioglow_table_image = pygame.image.load(os.path.join(device_relative_path, fll_bioglow_table_source))
 
 
 
 # FTC
-ftc_robot_image_absolute_source = 'Robot\\ftc_robot.png'
+ftc_robot_image_absolute_source = 'Robot/ftc_robot.png'
 ftc_robot_image_relative_source = os.path.join(device_relative_path, ftc_robot_image_absolute_source)
 ftc_robot_image_width_cm = 34
 ftc_robot_image_height_cm = 53
@@ -817,9 +828,16 @@ ftc_max_power = 1
 ftc_field_width_cm = 366  # og - 12ft
 ftc_field_height_cm = 366 # og - 12ft
 
-ftc_center_stage_field_source = 'Field\\FTC_CT_dark.png'
+ftc_center_stage_field_source = 'Field/FTC_CT_dark.png'
 ftc_center_stage_field_image = pygame.image.load(os.path.join(device_relative_path, ftc_center_stage_field_source))
 
+
+
+# the BIOGLOW field is a white line drawing, so the FLL preset runs a light theme:
+# a white-on-black interface is unreadable on top of it
+fll_background_color = (240, 240, 240)
+fll_axis_color = (30, 30, 30)
+fll_text_color = (30, 30, 30)
 
 
 default_presets = [["FLL Table", 
@@ -827,8 +845,12 @@ default_presets = [["FLL Table",
                                                 pixels_to_dec = 60,
                                                 trail_width = 7,
                                                 field_centric = True,
-                                                trail_color = pygame.Color("black")),
-                    fll_master_piece_table_image,
+                                                trail_color = pygame.Color("black"),
+                                                background_color = fll_background_color,
+                                                axis_color = fll_axis_color,
+                                                text_color = fll_text_color,
+                                                draw_grid = False),
+                    fll_bioglow_table_image,
                     Size(fll_table_width_cm, fll_table_height_cm),
                     1],
 

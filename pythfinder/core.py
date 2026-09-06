@@ -97,7 +97,7 @@ class Simulator():
         self.__update_event_manager()
 
         #reset frame
-        self.screen.fill(default_background_color)
+        self.screen.fill(self.constants.BACKGROUND_COLOR)
 
         if self.manual_control.compare():
             self.__update_controls()
@@ -143,7 +143,6 @@ class Simulator():
             if event.type == pygame.QUIT:
                 self.running.set(False)
                 print('\n\n')
-                pygame.quit()
 
 
 
