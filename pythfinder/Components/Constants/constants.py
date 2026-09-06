@@ -842,10 +842,16 @@ fll_robot_length_cm = 14   # front to back
 # of a 14cm robot, so 3.5cm behind the centre.
 fll_center_offset = Point(-3.5, 0)
 
-# distance between the two drive wheels, centre to centre. NOT the robot's
-# width - measure it. Every turn is scaled by this, so a wrong value makes
-# turns consistently over- or under-shoot.
-fll_track_width_cm = default_track_width
+# distance between the two drive wheels, centre to centre - measured on the
+# build. Every turn is scaled by this, so a wrong value makes turns
+# consistently over- or under-shoot.
+fll_track_width_cm = 16
+
+# top speed at full power, in cm/s. This converts a planned speed into a motor
+# power, so if it is wrong every straight comes out the wrong length. Measure it
+# on the robot with measure_max_velocity.py in the quick-start repo - 27.7 is
+# the library default, taken from somebody else's EV3.
+fll_real_max_velocity = 27.7
 
 # the BIOGLOW field is a white line drawing, so the FLL preset runs a light theme:
 # a white-on-black interface is unreadable on top of it
@@ -867,6 +873,7 @@ default_presets = [["FLL Table",
                                                 robot_width = fll_robot_width_cm,
                                                 robot_height = fll_robot_length_cm,
                                                 constraints2d = Constraints2D(track_width = fll_track_width_cm),
+                                                real_max_velocity = fll_real_max_velocity,
                                                 kinematics = TankKinematics(fll_track_width_cm,
                                                                             center_offset = fll_center_offset)),
                     fll_bioglow_table_image,
