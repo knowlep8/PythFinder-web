@@ -303,12 +303,27 @@ today.
   **The int16 overflow promised in 1.6** is caught here and reported as an error
   diagnostic, with `module_text` set to `None`.
 
-- [ ] **1.8 Package it for the browser.** Build a pure-Python wheel
-  (`uv build`). Pyodide will install it with `micropip.install(url, deps=False)`,
-  so the existing pygame/matplotlib dependencies for desktop users stay as they
-  are.
-  - *Done when:* a scratch HTML page loads Pyodide, installs the wheel, runs
-    `build_run` on the template run, and logs the same `COUNT` and `MARKERS`.
+- [x] **1.8 Package it for the browser.**
+  - `uv build --wheel` produces the wheel; `micropip.install(wheel, deps = False)`
+    installs it in Pyodide, so the pygame and matplotlib dependencies that
+    desktop users need are simply skipped.
+  - **The wheel had to be slimmed.** The published one is 13.5MB, of which the
+    Python code is 0.08MB — 0.6%. The rest is menu images (57%), the
+    documentation PDFs (26%) and screenshots (15%), none of which the planning
+    half ever opens. `tools/slim_wheel.py` strips those and rewrites the
+    RECORD, giving a **0.11MB** wheel for the browser. The PyPI wheel is
+    untouched: the simulator still needs its images.
+  - `tools/pyodide_check.html` is the page that proves it, and the instructions
+    for re-running it are at the top of the file.
+  - *Done:* in Chrome, Pyodide loaded in 3.6s, the wheel installed in 1.5s, and
+    `build_run` returned `STEPS = 6`, `MARKERS = (1764, 7942)`, `COUNT = 2607` —
+    **the same file the hub is running** — in 0.49s on Python 3.13.2. The mat
+    diagnostic came through identically to the desktop.
+
+  **Rebuilding a path took half a second** in the browser, against 38ms on the
+  desktop: roughly ten times slower, as expected of WASM. Fast enough to rebuild
+  as somebody edits, but step 2.2 should debounce rather than rebuild on every
+  keystroke.
 
 ---
 
@@ -518,14 +533,25 @@ Neither is caused by this work, and neither blocks it.
   robot is a tank drive, and this branch only runs for `SwerveKinematics`.
   Worth fixing before anyone uses the library for swerve, ideally with a golden
   run that covers it.
-- **The editable install invents a bare `Trajectory` module.** Importing
+- [ ] **The `Trajectory` class shadows the `Trajectory` package.** Importing
   `pythfinder.Trajectory.Segments.Primitives.generic` directly fails with
-  `cannot import name 'Segments' from 'Trajectory' (unknown location)`. It comes
-  from the setuptools editable-install shim in `.venv`, whose `MAPPING` only
-  covers the top-level `pythfinder` and delegates everything deeper: a clean
-  interpreter shows no such module. Importing `pythfinder` first, as everything
-  actually does, works fine. Worth re-checking in step 1.8, when the browser
-  loads a real wheel rather than an editable install.
+  `cannot import name 'Segments' from 'Trajectory' (unknown location)`.
+
+  Step 1.2 blamed the editable-install shim. **That was wrong**, and step 1.8
+  disproved it: the same failure happens from a real installed wheel in a clean
+  interpreter. The actual cause is a name collision. `pythfinder/__init__.py`
+  does `from .Trajectory import *`, and among those names is the `Trajectory`
+  *class* from `trajectory.py`, which overwrites the attribute pointing at the
+  `Trajectory` *subpackage*. `pythfinder.Trajectory` is therefore a class, and
+  `import a.b.c as x` — which resolves by walking attributes — walks into it and
+  stops.
+
+  Harmless for how the library is actually used: `from pythfinder import X` and
+  `from pythfinder.Trajectory.thing import Y` both resolve through
+  `sys.modules` and are unaffected, which is why every test and the browser
+  build pass. Fixing it means renaming one of the two, or keeping the class out
+  of the top-level namespace — worth doing before the package is published
+  again, since it makes a normal-looking import fail for no visible reason.
 
 ## Open decisions
 
@@ -542,8 +568,12 @@ Decide when we reach the step named. The recommendation is the default.
 
 - **Silent behaviour change in the refactor.** Mitigated by the golden files in
   1.1, captured before any edit.
-- **Pyodide first load on school Wi-Fi.** About 10 MB once, then cached. Test on
-  the actual network before a practice session.
+- **Pyodide first load on school Wi-Fi.** Measured in step 1.8 on a home
+  connection: 3.6s for the Pyodide runtime, 1.5s to install the library. The
+  library's own wheel is 0.11MB once slimmed — it would have been 13.5MB
+  unslimmed, which is why `tools/slim_wheel.py` exists. Cached after the first
+  visit. Still worth testing on the school's actual network before a practice
+  session.
 - **Hub heap.** Each run is roughly 6 bytes per exported state (about 16 KB for
   the template run). Several long runs in one program add up, hence 4.6.
 - **Kids writing blocking custom actions.** Blocks cannot block; the code editor
