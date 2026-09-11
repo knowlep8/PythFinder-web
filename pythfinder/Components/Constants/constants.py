@@ -15,6 +15,16 @@ import pygame
 import math
 import os
 
+# Importing this module loads the menu images and builds Constants objects for
+# the presets, which read the mouse cursor -- all of which need a live pygame.
+#
+# Starting it used to happen in pythfinder/__init__.py, so importing any part of
+# the library started a window system. It belongs here instead, with the first
+# code that actually needs it: everything above this line is maths, and the web
+# planner imports that half in a browser where pygame does not exist.
+# See docs/web-planner.md, step 1.7.
+pygame.init()
+
 # file containing:
 #           - default constant values, image manipulation for the interface and Constants class
 #           - default keys for joystick control
