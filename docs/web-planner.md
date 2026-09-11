@@ -213,11 +213,26 @@ today.
   now. Only the builder does that, and team scripts use the builder, but a
   script constructing one by hand would need updating.
 
-- [ ] **1.5 One-step hub module.** Port `render()` and `parse()` from the
-  quick-start's `tools/txt_to_py.py` into `pythfinder/Export/hubModule.py`,
-  working from states directly instead of re-parsing the `.txt`.
-  - *Done when:* for every golden run, the output equals running today's
-    `txt_to_py.py` on the golden `.txt` (byte-for-byte).
+- [x] **1.5 One-step hub module.**
+  - `pythfinder/Export/hubModule.py` packs a run into the hub's format and
+    renders the module text. `Trajectory.hub_module(name, steps)` returns it, so
+    no `.txt` has to exist first and a browser can hand over a finished file.
+  - Both exports are now built from one `wheel_speed_groups()` walk in the
+    generator, so the `.txt` and the module cannot describe different motion.
+  - The powers must be rounded to two decimals *before* being scaled by 100.
+    That is what the `.txt` writes and therefore what the hub has always been
+    fed; scaling the unrounded value shifts the occasional unit.
+  - Tank only. A robot without exactly two drive wheels raises a clear error
+    rather than writing a file the hub would misread — the format carries two
+    motors per state.
+  - *Done:* 64 tests pass. The generated module matches
+    **the `traj_run_a.py` actually on the hub**, and matches `txt_to_py.py` run
+    against all 19 golden exports (those cases skip if the quick-start repo is
+    not checked out). A built wheel contains the new subpackage.
+
+  **One deviation from "byte-for-byte":** the first line differs, because it
+  says which tool wrote the file — ours does not claim to be `txt_to_py.py`.
+  The tests compare everything after it, which is all the data the hub reads.
 
 - [ ] **1.6 Diagnostics as data.** Replace the `print()` warnings in the builder
   with a list of `Diagnostic(level, step_index, message, suggestion)` on the
