@@ -264,25 +264,44 @@ today.
   from `hubModule`, because there is no file to hand over — a diagnostic would
   imply the run was usable. Step 1.7 catches it and reports it as an error.
 
-- [ ] **1.7 The run description and `build_run`.**
-  - Define the JSON a run is saved as (see *Run file format* below).
-  - `pythfinder/headless.py: build_run(description: dict) -> dict` returns
-    `poses` (downsampled for drawing), `total_ms`, `markers` (with the action
-    id each belongs to, in firing order), `diagnostics`, and `module_text`.
-  - Marker order: pass each action's id as the marker's `fun`. After `build()`,
-    read `final_markers`; it is already sorted by time, so its order *is* the
-    hub order.
-  - **Structural problem to solve here, found in 1.3:** `pythfinder/__init__.py`
-    starts with `import pygame` and `pygame.init()`, and importing *any*
-    submodule runs it. So no amount of tidying inside the package makes
-    `pythfinder.headless` importable without pygame. Either `__init__.py` has to
-    become lazy (PEP 562 `__getattr__`, so `Simulator` is only built on demand),
-    or the headless core ships as its own top-level module outside the
-    `pythfinder` package. Decide when starting this step; the lazy `__init__` is
-    less disruptive to team scripts that do `import pythfinder`.
-  - *Done when:* in a fresh venv with only this package installed with
-    `--no-deps`, `python -c "from pythfinder.headless import build_run"` works,
-    and the template run described as JSON gives the golden output.
+- [x] **1.7 The run description and `build_run`.**
+  - `pythfinder/headless.py: build_run(run, pose_every_ms = 20)` takes the run
+    as data and returns `ok`, `total_ms`, `poses` (thinned for drawing),
+    `markers`, `diagnostics` and `module_text`. Nothing raises: a run a child
+    typed wrong is ordinary, not exceptional, so every problem comes back as a
+    diagnostic against its step.
+  - Marker order works as planned. The action's id is handed over where the
+    marker's function goes — never called, but it rides along on the marker.
+    The builder sorts markers by time, so the order they come back in *is* the
+    order the hub must bind them in.
+  - **The structural problem is solved with a lazy `__init__`.** Importing
+    `pythfinder` now loads only the planning half; `Simulator` and the rest of
+    `core` arrive through a module `__getattr__` on first use. `pygame.init()`
+    moved to `constants.py`, the first module that genuinely needs a live
+    pygame — it loads images and reads the mouse cursor while being imported.
+  - *Done:* 81 tests pass. In a plain system interpreter **with no pygame and
+    no matplotlib installed**, `from pythfinder.headless import build_run`
+    imports, builds the template run, and produces a hub module identical to
+    the file on the robot, with `pygame` never appearing in `sys.modules`. The
+    simulator still opens, follows and draws.
+
+  **Two traps, each of which cost a test run here:**
+
+  - A module `__getattr__` has to answer submodule names itself. Importing
+    `pythfinder.core` asks the package for the attribute `core`, so answering
+    that by importing `core` calls `__getattr__` again, until the stack runs
+    out.
+  - `pygame.init()` must run before `constants.py` is imported, not before
+    `core.py` is. A module's import statements run first, and `core`'s first
+    line imports `constants`, which reads the mouse cursor as it goes.
+
+  **Step numbers are translated back.** Consecutive drives in one direction, and
+  consecutive waits, are merged into a single segment by the builder, so segment
+  numbers drift away from the step numbers a person wrote. `build_run` keeps a
+  map and reports each diagnostic against the step as written.
+
+  **The int16 overflow promised in 1.6** is caught here and reported as an error
+  diagnostic, with `module_text` set to `None`.
 
 - [ ] **1.8 Package it for the browser.** Build a pure-Python wheel
   (`uv build`). Pyodide will install it with `micropip.install(url, deps=False)`,
@@ -415,7 +434,9 @@ Order these after watching the kids use phase 3.
 
 ---
 
-## Run file format (draft — finalised in step 1.7)
+## Run file format
+
+As implemented in step 1.7 and understood by `build_run`.
 
 ```json
 {
@@ -435,12 +456,23 @@ Order these after watching the kids use phase 3.
       "actions": [ { "id": "a2", "at": { "ms": -1 },
                      "do": { "motor": "leftTask", "call": "run", "speed": -500 },
                      "label": "Left arm up" } ] },
-    { "type": "toPose", "x": -46, "y": -83, "head": 0, "heading": "fixed" }
+    { "type": "toPose", "x": -46, "y": -83, "head": 0 }
   ]
 }
 ```
 
-`version` lets us migrate old saved runs when the format changes.
+- Step types: `drive` (cm), `wait` (ms), `turn` (deg), `toPoint` (x, y) and
+  `toPose` (x, y, head). `turn`, `toPoint` and `toPose` take `reversed`. There
+  is no heading-mode field — step 1.1 established those collapse on a tank
+  drive.
+- An action says **when** with `at`: `{"cm": 35}` into the step, or `{"ms": 40}`,
+  and negative values count back from the end of the step.
+- `do` and `label` are carried by the browser and written into the generated
+  file in step 3; `build_run` only needs `id` and `at`.
+- `robot` is `"fll_team"`, or an object of numbers for the settings panel:
+  `track_width_cm`, `max_velocity_cm_s`, and optionally `center_offset_cm`,
+  `max_power`, `width_cm`, `length_cm`.
+- `version` lets us migrate old saved runs when the format changes.
 
 ---
 
@@ -461,6 +493,13 @@ Neither is caused by this work, and neither blocks it.
   joystick control, which is presumably why nobody has hit it. A guard that
   skips the derivative term when no time has passed would fix it; doing so
   changes simulator behaviour, so it wants a deliberate decision.
+- [ ] **The team's own run overhangs the table by 7mm.** The new mat check in
+  1.6 reports it, and it is not a false alarm: turning on the spot at the launch
+  area swings a corner 11.8cm from the middle of the robot — `sqrt(7² + 9.5²)` —
+  while `x = -46` leaves only 11.15cm to the edge of a 114.3cm table. So during
+  the final turn home, a corner of the robot sits 0.7cm past the edge of the
+  mat. Worth checking against the real table, where the border wall may or may
+  not be in the way; moving the start pose 1cm inwards would clear it.
 - [ ] **`rotate_by` reflects as well as rotating.** Both
   `mathEx.Point.rotate_by` (`mathEx.py:55`) and the free `rotate_by`
   (`mathEx.py:274`) compute `y = x·sin − y·cos`, where a rotation needs
