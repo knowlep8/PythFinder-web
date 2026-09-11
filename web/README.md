@@ -15,6 +15,23 @@ docker compose up -d --build      # from the repository root
 open http://127.0.0.1:8080
 ```
 
+If that reports `unknown shorthand flag: 'd'`, the Docker CLI has no compose
+plugin and is reading `-d` as its own flag. Either use the standalone binary:
+
+```bash
+docker-compose up -d --build
+```
+
+or point the CLI at the plugin Homebrew already installed, once:
+
+```bash
+mkdir -p ~/.docker/cli-plugins
+ln -sfn /opt/homebrew/lib/docker/cli-plugins/docker-compose ~/.docker/cli-plugins/
+```
+
+Both need a running engine — Docker Desktop, colima, or the daemon on whichever
+host is serving this. A CLI on its own cannot build anything.
+
 ## Working on it
 
 Vite's dev server is much quicker to iterate with, but it needs the two build
