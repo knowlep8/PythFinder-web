@@ -182,17 +182,36 @@ today.
   `Components/robot.py:103`. The duplicate goes when the generator switches to
   taking a `RobotConfig`.
 
-- [ ] **1.4 Builder and generator take a `RobotConfig`, not a `Simulator`.**
-  - `TrajectoryBuilder(start_pose, robot=FLL_ROBOT)`. Keep the old
-    `TrajectoryBuilder(sim, start_pose, preset)` signature working: it builds a
-    `RobotConfig` from the preset and passes it through, so existing team
-    scripts do not break.
-  - `TrajectoryGenerator` takes the config. Split it into
-    `wheel_speed_text(...) -> str` (pure) and the existing file-writing wrapper.
-  - `Trajectory.follow()` and `graph()` still need a sim or matplotlib. Make
-    `follow()` take `sim` as an argument when there is no stored one.
-  - *Done when:* goldens pass using the new signature, and the old signature
-    still works in `fll_run_template.py`.
+- [x] **1.4 Builder and generator take a `RobotConfig`, not a `Simulator`.**
+  - `TrajectoryBuilder(START_POSE, robot = FLL_ROBOT)` builds with no interface
+    at all. `TrajectoryBuilder(sim, start_pose, preset)` still works exactly as
+    before — a `Pose` where the simulator usually goes is what tells them apart.
+  - `TrajectoryGenerator` takes the robot, not the simulator, and each export
+    now has a pure `wheel_speeds_text()` / `chassis_speeds_text()` half plus the
+    file-writing wrapper. `Trajectory.text()` exposes it, which is what the
+    browser will download instead of writing a file.
+  - `Trajectory(states, markers, robot, sim = None)`. The follower and grapher
+    are imported *inside* `follow()` and `graph()`, so importing this module no
+    longer drags in `core` or matplotlib.
+  - `follow()` now takes the simulator first — which is what README line 256 and
+    both team scripts already passed, landing in `perfect` by luck. A bool in
+    that position still means the old `follow(perfect, wait, steps)` call and
+    shifts every argument along.
+  - The duplicated `to_motor_power` is gone: `Components/robot.py` delegates to
+    `RobotConfig`, so the exporter and the simulator cannot drift apart.
+  - *Done:* 43 tests pass. Every golden run exports byte-identical text when
+    built with no simulator, checked by `test_builds_without_a_simulator`. The
+    real `fll_run_template.py --export` still writes exactly the bytes on the
+    hub.
+
+  **Behaviour that changed on purpose:** the robot is captured when the builder
+  is created, instead of being read off `sim.constants` at export time. Building
+  a second trajectory with a different preset can no longer change what an
+  already-built trajectory exports.
+
+  **Compatibility note:** `Trajectory(...)` itself is constructed differently
+  now. Only the builder does that, and team scripts use the builder, but a
+  script constructing one by hand would need updating.
 
 - [ ] **1.5 One-step hub module.** Port `render()` and `parse()` from the
   quick-start's `tools/txt_to_py.py` into `pythfinder/Export/hubModule.py`,
@@ -407,6 +426,14 @@ Neither is caused by this work, and neither blocks it.
   joystick control, which is presumably why nobody has hit it. A guard that
   skips the derivative term when no time has passed would fix it; doing so
   changes simulator behaviour, so it wants a deliberate decision.
+- [ ] **The swerve export is malformed.** In the wheel-speeds export, the swerve
+  branch formats `(power, 2)` — a tuple — where it plainly meant
+  `round(power, 2)`, so a swerve robot's file gets `(46.66, 2) 30.0` instead of
+  `46.66 30.0`. Untouched by step 1.4, which carried the line across verbatim so
+  the goldens could prove nothing changed. It affects nobody here: the team's
+  robot is a tank drive, and this branch only runs for `SwerveKinematics`.
+  Worth fixing before anyone uses the library for swerve, ideally with a golden
+  run that covers it.
 - **The editable install invents a bare `Trajectory` module.** Importing
   `pythfinder.Trajectory.Segments.Primitives.generic` directly fails with
   `cannot import name 'Segments' from 'Trajectory' (unknown location)`. It comes
