@@ -130,14 +130,29 @@ today.
   the motion. This is asserted in `test_heading_modes_collapse_on_a_tank_drive`
   and it changes what step 2.4 should offer.
 
-- [ ] **1.2 Remove the tiny imports.**
-  - `mathEx.py`: drop `import pygame`; make the `pygame_vector_to_point` hint a
-    string, or move that helper to `Components/`.
-  - `PIDController.py`: use `time.monotonic()`, or import pygame inside the
-    method.
-  - `Segments/Primitives/generic.py`: import matplotlib inside
+- [x] **1.2 Remove the tiny imports.**
+  - `mathEx.py`: `import pygame` gone. The only use was the type hint on
+    `pygame_vector_to_point`, now quoted. The function stays where it is, since
+    it is part of the public surface and its one caller
+    (`Components/robot.py:219`) is pygame code anyway.
+  - `PIDController.py`: `pygame.time.get_ticks()` replaced by
+    `milliseconds_since_start()`, built on `time.monotonic()` and keeping the
+    same meaning (whole ms since the program started). `time` is bound as
+    `_time` because this module is star-imported.
+  - `Segments/Primitives/generic.py`: matplotlib now imported inside
     `graph_motion_states`.
-  - *Done when:* goldens still pass.
+  - **Also needed, and not in the original list:** `trajectoryGrapher.py`
+    imported matplotlib at the top, and `Trajectory/__init__.py` imports the
+    grapher, so `import pythfinder` still required matplotlib. It now loads on
+    demand through a module-level `mplt` that `_load_matplotlib()` fills in, so
+    all ten call sites stay as they were.
+  - *Done:* 24 tests pass, goldens unchanged to the byte. `import pythfinder`
+    no longer loads matplotlib.
+
+  Note the limit of this step: importing any submodule still imports
+  `pythfinder/__init__.py`, which imports pygame and `core`, so the package as a
+  whole still needs pygame. That is step 1.3's job, and only then can the
+  headless import be tested end to end.
 
 - [ ] **1.3 Split robot constants from UI constants.**
   - New `pythfinder/Trajectory/robotConfig.py` with a `RobotConfig` dataclass:
@@ -350,6 +365,28 @@ Order these after watching the kids use phase 3.
 `version` lets us migrate old saved runs when the format changes.
 
 ---
+
+## Found along the way
+
+Neither is caused by this work, and neither blocks it.
+
+- [ ] **The joystick heading PID divides by zero.** `PIDController.calculate()`
+  divides by the time since the previous call, in whole milliseconds. Two calls
+  inside one millisecond means a `ZeroDivisionError`, and at the simulator's
+  1000 FPS ceiling that is reachable: 199 of 200 back-to-back readings share a
+  millisecond. It predates this work — `pygame.time.get_ticks()` behaved the
+  same way, and step 1.2 kept the semantics deliberately. It only bites under
+  joystick control, which is presumably why nobody has hit it. A guard that
+  skips the derivative term when no time has passed would fix it; doing so
+  changes simulator behaviour, so it wants a deliberate decision.
+- **The editable install invents a bare `Trajectory` module.** Importing
+  `pythfinder.Trajectory.Segments.Primitives.generic` directly fails with
+  `cannot import name 'Segments' from 'Trajectory' (unknown location)`. It comes
+  from the setuptools editable-install shim in `.venv`, whose `MAPPING` only
+  covers the top-level `pythfinder` and delegates everything deeper: a clean
+  interpreter shows no such module. Importing `pythfinder` first, as everything
+  actually does, works fine. Worth re-checking in step 1.8, when the browser
+  loads a real wheel rather than an editable install.
 
 ## Open decisions
 

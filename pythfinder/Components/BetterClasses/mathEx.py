@@ -1,6 +1,5 @@
 from typing import List
 
-import pygame
 import math
 
 EPSILON = 1e-5
@@ -431,7 +430,10 @@ def convert_points_to_lists(points: List[Point]):
     
     return x, y
 
-def pygame_vector_to_point(vector: pygame.math.Vector2 | List[pygame.math.Vector2]):
+# The type is quoted so this file does not have to import pygame. Everything
+# else here is plain maths, and the web planner needs to import it in a browser
+# where pygame is not available. The function itself only reads .x and .y.
+def pygame_vector_to_point(vector: "pygame.math.Vector2 | List[pygame.math.Vector2]"):
     if not isinstance(vector, list):
         return Point(vector.x, vector.y)
     

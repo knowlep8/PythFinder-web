@@ -1,7 +1,21 @@
 from pythfinder.Trajectory.Segments import *
 from pythfinder.core import *
 
-import matplotlib.pyplot as mplt
+# matplotlib is loaded on demand rather than at import time. Graphing is a
+# desktop debugging aid, but importing this module is not optional -- it is
+# pulled in by Trajectory/__init__.py -- and the web planner has to import the
+# package in a browser, where matplotlib is not installed. Every plotting
+# method below reaches matplotlib through this one name.
+mplt = None
+
+def _load_matplotlib():
+    global mplt
+
+    if mplt is None:
+        import matplotlib.pyplot
+        mplt = matplotlib.pyplot
+
+    return mplt
 
 class TrajectoryGrapher():
     def __init__(self,
@@ -17,6 +31,8 @@ class TrajectoryGrapher():
    
     
     def graph_wheel_speeds(self, connect: bool = False, velocity: bool = True, acceleration: bool = True):
+        _load_matplotlib()
+
         VEL = []
         ACC = []
 
@@ -104,6 +120,8 @@ class TrajectoryGrapher():
 
 
     def graph_chassis_speeds(self, connect: bool = False, velocity: bool = True, acceleration: bool = True):
+        _load_matplotlib()
+
         VEL_X = []
         VEL_Y = []
         ANG_VEL = []

@@ -1,7 +1,6 @@
 from pythfinder.Components.BetterClasses.mathEx import *
 from pythfinder.Trajectory.Control.feedforward import *
 from pythfinder.Trajectory.Kinematics.generic import *
-import matplotlib.pyplot as mplt
 
 
 class MotionAction(Enum):
@@ -202,6 +201,11 @@ class MotionSegment(ABC):
 
         time = linspace(0, len(value), len(value))
 
+
+        # Imported here rather than at the top of the file: this debugging graph
+        # is the only thing in the segment code that wants matplotlib, and the
+        # web planner has to import the segments without it.
+        import matplotlib.pyplot as mplt
 
         mplt.figure(figsize=(7, 7), facecolor = 'black')
         mplt.style.use('dark_background')
