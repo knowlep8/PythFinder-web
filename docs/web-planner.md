@@ -154,17 +154,33 @@ today.
   whole still needs pygame. That is step 1.3's job, and only then can the
   headless import be tested end to end.
 
-- [ ] **1.3 Split robot constants from UI constants.**
-  - New `pythfinder/Trajectory/robotConfig.py` with a `RobotConfig` dataclass:
-    `kinematics`, `constraints`, `real_max_velocity`, `max_power`. It adds
-    `to_motor_power(velocity)` (moved from `Components/robot.py:103`).
-  - Define the FLL robot as `FLL_ROBOT = RobotConfig(...)` next to it, using the
-    measured numbers above. `constants.py` imports those values instead of
-    defining them, so they are written down once.
-  - Move the font check and all `pygame.image.load` calls so they only happen
-    when a `Simulator` is created, not at import time.
-  - *Done when:* goldens pass and the desktop simulator still opens, draws the
-    field, and follows `fll_run_template.py`.
+- [x] **1.3 Split robot constants from UI constants.**
+  - `pythfinder/Trajectory/robotConfig.py` holds `RobotConfig` (`kinematics`,
+    `constraints`, `REAL_MAX_VEL`, `MAX_POWER`, plus the drawing dimensions) and
+    `to_motor_power(velocity)`. It imports nothing but maths.
+  - The team's measurements moved there, and `FLL_ROBOT` describes the robot.
+    `constants.py` imports them back under their old names, and the FLL preset
+    is **built from `FLL_ROBOT`** rather than repeating the numbers — so the
+    unchanged goldens prove it reproduces the robot exactly.
+  - The font check became `check_font_available()`, called from
+    `Simulator.__init__`. Importing the library no longer needs the font; a
+    missing font still raises `FONT NOT FOUND`, verified by faking its absence.
+  - *Done:* 24 tests pass, goldens byte-identical. The simulator opens, reports
+    the preset as 64.3 cm/s and 16 cm track, follows a run to the right pose and
+    draws.
+
+  **The image loads were deliberately left alone.** The step originally asked
+  for them to be deferred as well. Measured first: 88 references across four
+  files (66 in `mainMenu.py`), 130 load-and-scale calls, and 13 modules
+  star-importing `constants.py` — so the names cannot be made lazy without
+  rewriting every call site. It would buy about 1.5 s of desktop start-up and
+  nothing for the browser, which cannot import `constants.py` at all
+  (module-level `pygame.Color`, `pygame.transform`). Decided against; revisit
+  only if the simulator ever feels slow to open.
+
+  **Left for 1.4:** `to_motor_power` now exists both on `RobotConfig` and at
+  `Components/robot.py:103`. The duplicate goes when the generator switches to
+  taking a `RobotConfig`.
 
 - [ ] **1.4 Builder and generator take a `RobotConfig`, not a `Simulator`.**
   - `TrajectoryBuilder(start_pose, robot=FLL_ROBOT)`. Keep the old
@@ -202,6 +218,14 @@ today.
   - Marker order: pass each action's id as the marker's `fun`. After `build()`,
     read `final_markers`; it is already sorted by time, so its order *is* the
     hub order.
+  - **Structural problem to solve here, found in 1.3:** `pythfinder/__init__.py`
+    starts with `import pygame` and `pygame.init()`, and importing *any*
+    submodule runs it. So no amount of tidying inside the package makes
+    `pythfinder.headless` importable without pygame. Either `__init__.py` has to
+    become lazy (PEP 562 `__getattr__`, so `Simulator` is only built on demand),
+    or the headless core ships as its own top-level module outside the
+    `pythfinder` package. Decide when starting this step; the lazy `__init__` is
+    less disruptive to team scripts that do `import pythfinder`.
   - *Done when:* in a fresh venv with only this package installed with
     `--no-deps`, `python -c "from pythfinder.headless import build_run"` works,
     and the template run described as JSON gives the golden output.
@@ -370,7 +394,11 @@ Order these after watching the kids use phase 3.
 
 Neither is caused by this work, and neither blocks it.
 
-- [ ] **The joystick heading PID divides by zero.** `PIDController.calculate()`
+- [x] **The joystick heading PID divided by zero.** Fixed in `5e4dd06`: the gap
+  is checked before dividing, and the previous derivative is held when no time
+  has passed. Original report below.
+
+  `PIDController.calculate()`
   divides by the time since the previous call, in whole milliseconds. Two calls
   inside one millisecond means a `ZeroDivisionError`, and at the simulator's
   1000 FPS ceiling that is reachable: 199 of 200 back-to-back readings share a
