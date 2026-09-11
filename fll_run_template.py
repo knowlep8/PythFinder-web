@@ -86,10 +86,12 @@ def build(sim):
 
             .turnToDeg(90)
 
-            .inLineCM(-30)
+            .inLineCM(30)
                 # -1 means "1ms before the end of this move", so negative values
                 # count back from the end
                 .addRelativeTemporalMarker(-1, lambda: print("marker 2: arm up"))
+
+            .toPose(START_POSE)
 
             .build())
 
