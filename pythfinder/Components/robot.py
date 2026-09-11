@@ -1,6 +1,7 @@
 from pythfinder.Components.BetterClasses.edgeDetectorEx import *
 from pythfinder.Components.BetterClasses.booleanEx import *
 from pythfinder.Components.Constants.constants import *
+from pythfinder.Trajectory.robotConfig import robot_from_constants
 from pythfinder.Trajectory.constraints import *
 from pythfinder.Components.trail import *
 
@@ -101,7 +102,9 @@ class Robot():
         return self.kinematics.inverse(self.chassis_state)
 
     def to_motor_power(self, value):
-        return round(value * self.constants.MAX_POWER / self.constants.REAL_MAX_VEL, 2)
+        # the sum itself lives on RobotConfig, so the exporter and the
+        # simulator cannot drift apart on what a velocity is worth in power
+        return robot_from_constants(self.constants).to_motor_power(value)
 
     def to_field_coords(self, pose: Pose):
         return Pose((self.constants.screen_size.half_h - pose.y) * 10 / self.constants.PIXELS_2_DEC, 

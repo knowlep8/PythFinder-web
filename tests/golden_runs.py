@@ -20,6 +20,7 @@ from pathlib import Path
 
 from pythfinder import Point, Pose, TrajectoryBuilder
 from pythfinder.Trajectory.constraints import Constraints, Constraints2D
+from pythfinder.Trajectory.robotConfig import FLL_ROBOT
 
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
@@ -40,6 +41,15 @@ TRACK_WIDTH_CM = 16
 
 
 def _start(sim, pose = START):
+    """Begin a run, with or without a simulator.
+
+    Passing sim = None builds through the interface-free signature, which is
+    how the web planner will call it. Both ways have to produce the same
+    trajectory, and test_builds_without_a_simulator checks exactly that.
+    """
+    if sim is None:
+        return TrajectoryBuilder(pose, robot = FLL_ROBOT)
+
     return TrajectoryBuilder(sim, pose, FLL_PRESET)
 
 

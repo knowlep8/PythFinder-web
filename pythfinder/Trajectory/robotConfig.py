@@ -64,6 +64,22 @@ class RobotConfig():
                            self.LENGTH_CM)
 
 
+def robot_from_constants(constants) -> RobotConfig:
+    """Describe the robot a simulator is currently set up for.
+
+    Takes a Constants object, but by duck typing rather than by import: this
+    module must not depend on anything that pulls in pygame. The kinematics and
+    constraints are copied, so later changes to the simulator cannot quietly
+    alter a trajectory that has already been built.
+    """
+    return RobotConfig(kinematics = constants.kinematics.copy(),
+                       constraints = constants.constraints.copy(),
+                       real_max_velocity = constants.REAL_MAX_VEL,
+                       max_power = constants.MAX_POWER,
+                       width_cm = constants.ROBOT_WIDTH,
+                       length_cm = constants.ROBOT_HEIGHT)
+
+
 # --- the team's robot, measured on the build --------------------------------
 
 fll_robot_width_cm = 19    # side to side, across the wheels

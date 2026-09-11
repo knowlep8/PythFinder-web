@@ -3,6 +3,10 @@ from pythfinder.Trajectory.Markers.generic import *
 from pythfinder.Trajectory.trajectory import *
 from pythfinder.Trajectory.Segments import *
 
+from pythfinder.Trajectory.robotConfig import (FLL_ROBOT,
+                                               RobotConfig,
+                                               robot_from_constants)
+
 # for marker sorting
 type_priority = {
     'constraints': 0,
@@ -13,33 +17,66 @@ type_priority = {
 
 class TrajectoryBuilder():
     def __init__(self,
-                 sim: Simulator,
+                 sim = None,
                  start_pose: Pose | None = None,
-                 preset: int = 1):
-        
+                 preset: int = 1,
+                 robot: RobotConfig | None = None):
+        """Start describing a run.
+
+        Two ways to call this:
+
+            TrajectoryBuilder(sim, START_POSE, preset)   # with a simulator
+            TrajectoryBuilder(START_POSE, robot = FLL_ROBOT)
+
+        The first is what team scripts have always used: the robot is taken
+        from the preset, and the trajectory can be followed in the window
+        afterwards. The second needs no interface at all, which is what lets
+        the web planner build the same trajectory in a browser.
+        """
+
+        # called the second way, with the pose where the simulator usually goes
+        if isinstance(sim, Pose):
+            sim, start_pose = None, sim
+
         self.sim = sim
-        self.robot = sim.robot
 
-        self.preset_nr = preset
+        if sim is None:
+            self.robot_config = FLL_ROBOT.copy() if robot is None else robot
 
-        self.sim.presets.on(self.preset_nr)
-        self.preset = self.sim.presets.get(self.preset_nr)
-        
+            self.preset = None
+            self.preset_nr = None
 
-        
-        if preset is None:
-            self.kinematics = self.sim.constants.kinematics
-            self.CONSTRAINTS = self.sim.constants.constraints
-        
+            self.kinematics = self.robot_config.kinematics
+            self.CONSTRAINTS = self.robot_config.constraints
+
         else:
-            self.kinematics = self.preset.preset_constants.kinematics
-            self.CONSTRAINTS = self.preset.preset_constants.constraints
+            self.robot = sim.robot
 
-            self.sim.constants.REAL_MAX_VEL = self.preset.preset_constants.REAL_MAX_VEL
-            self.sim.constants.MAX_POWER = self.preset.preset_constants.MAX_POWER
+            self.preset_nr = preset
 
-        self.sim.constants.kinematics = self.kinematics.copy()
-        self.sim.constants.constraints = self.CONSTRAINTS.copy()
+            self.sim.presets.on(self.preset_nr)
+            self.preset = self.sim.presets.get(self.preset_nr)
+
+
+
+            if preset is None:
+                self.kinematics = self.sim.constants.kinematics
+                self.CONSTRAINTS = self.sim.constants.constraints
+
+            else:
+                self.kinematics = self.preset.preset_constants.kinematics
+                self.CONSTRAINTS = self.preset.preset_constants.constraints
+
+                self.sim.constants.REAL_MAX_VEL = self.preset.preset_constants.REAL_MAX_VEL
+                self.sim.constants.MAX_POWER = self.preset.preset_constants.MAX_POWER
+
+            self.sim.constants.kinematics = self.kinematics.copy()
+            self.sim.constants.constraints = self.CONSTRAINTS.copy()
+
+            # captured now rather than read at export time, so that building a
+            # second trajectory cannot change what this one exports
+            self.robot_config = (robot if robot is not None
+                                 else robot_from_constants(self.sim.constants))
 
 
 
@@ -278,7 +315,8 @@ class TrajectoryBuilder():
         
 
         self.__process_final_function_markers()
-        return Trajectory(self.sim, self.states, self.final_markers)
+        return Trajectory(self.states, self.final_markers,
+                          self.robot_config, self.sim)
 
 
         

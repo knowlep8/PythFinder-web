@@ -108,3 +108,19 @@ def test_consecutive_lines_merge(sim, tmp_path):
 
     assert (export(merged(sim), "merged", steps, tmp_path)
             == export(single(sim), "single", steps, tmp_path))
+
+
+@pytest.mark.parametrize("name", sorted(GOLDEN_RUNS))
+def test_builds_without_a_simulator(name):
+    """Every run exports the same bytes with no simulator involved.
+
+    This is what the web planner needs: no window, no preset, no pygame
+    surfaces -- just a robot description. It takes no `sim` fixture at all, so
+    a trajectory quietly depending on one would fail here rather than pass by
+    accident.
+    """
+    build, steps = GOLDEN_RUNS[name]
+    golden = GOLDEN_DIR / "{0}.txt".format(name)
+
+    assert build(None).text(steps = steps) == golden.read_text(), (
+        "'{0}' exports differently when built without a simulator".format(name))
