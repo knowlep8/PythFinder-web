@@ -63,8 +63,15 @@ Settled unless we find a reason to revisit them.
 1. **One copy of the motion math, in Python.** The website runs the existing
    library in the browser with **Pyodide**. We do not port it to JavaScript: two
    copies drift, and the hub output must match the desktop tool exactly.
-2. **Static site, no server.** No accounts, no hosting cost. Runs are saved in
-   the browser and exported/imported as a `.json` run file.
+2. **Served from our own container, and still a static bundle.** A Docker image
+   (Vite build → nginx) runs on the team's VPS, or on a machine at home reached
+   over Tailscale. Having a server is a deployment convenience, not a reason to
+   move the maths onto it: the page stays static and all the Python still runs
+   in the browser, so the planner keeps working at a venue once it is loaded.
+   Pyodide and the wheel are **vendored into the image** rather than pulled from
+   a CDN, so nothing external is needed at run time and a locked-down school
+   network cannot break it. Runs are saved in the browser and
+   exported/imported as a `.json` file, unless we add shared storage in 2.8.
 3. **Draw with a normal HTML canvas**, not pygame-in-the-browser. The pygame
    menus are image-based and we want a better UI, not a port of the old one.
 4. **The run is a list of steps, and that list is the source of truth.** The
@@ -332,15 +339,38 @@ today.
 Goal: plan a run with drive/turn/wait/go-to steps, watch it, and download a
 working hub file. No actions yet.
 
-- [ ] **2.1 Scaffold `web/`.** Vite + TypeScript. Keep dependencies minimal; a
-  small UI library such as Preact is fine if the step list gets fiddly.
-  - GitHub Actions workflow builds the wheel and the site and deploys to
-    GitHub Pages.
-  - *Decision here:* public Pages site, or private (see *Open decisions*).
+- [ ] **2.1 Scaffold `web/`, and the container that serves it.** Vite +
+  TypeScript. Keep dependencies minimal; a small UI library such as Preact is
+  fine if the step list gets fiddly.
+  - A multi-stage `Dockerfile`:
+    1. python stage — `uv build --wheel`, then `tools/slim_wheel.py`, giving the
+       0.11MB wheel;
+    2. node stage — `npm ci && npm run build`;
+    3. runtime — nginx serving the built site, the slim wheel, and a **vendored
+       copy of Pyodide** (from the npm package or the release tarball). No CDN.
+  - A `compose.yaml` next to it, so the host runs
+    `git pull && docker compose up -d --build`. Rebuilding the image is the
+    deploy; there is no registry unless we later want one.
+  - Cache headers matter more than usual: the Pyodide runtime is the big
+    download and never changes between releases, so serve it immutable and let
+    the small bundle revalidate.
+  - **HTTPS is not optional.** A service worker (2.9) and Web Bluetooth (4.7)
+    both require a secure context. On the VPS that means a reverse proxy with a
+    real certificate; over Tailscale, `tailscale serve` puts the container
+    behind an HTTPS name on the tailnet with the certificate handled for us.
+  - *Decision here:* VPS or home-plus-Tailscale — see *Open decisions*. The
+    image is the same either way, so this can be deferred until the first
+    deploy.
+  - *Done when:* `docker compose up` on the host serves a page that loads
+    Pyodide from the same origin and reports the Python version, with no
+    network requests leaving the host.
 - [ ] **2.2 Python worker.** Run Pyodide in a Web Worker so the page never
   freezes. Message shape: `{run} -> {poses, markers, diagnostics, moduleText}`.
-  Show a loading screen on first visit (~10 MB, cached afterwards). Rebuild with
-  a short debounce whenever the run changes.
+  Both the runtime and the wheel come from our own container, so the first visit
+  is a LAN-speed download rather than a trip to a CDN; show a loading screen for
+  it anyway, since it is still the slowest moment the kids will see.
+  Step 1.8 measured a rebuild at 0.49s in the browser against 38ms on the
+  desktop, so debounce the rebuild rather than running it on every keystroke.
 - [ ] **2.3 Field view.** Canvas with the BIOGLOW image at true scale and the
   robot sprite. Coordinate helpers carry the +x-up / +y-right / CCW convention
   over from `Components/robot.py:106-114`. Show the mouse position in field cm.
@@ -373,6 +403,19 @@ working hub file. No actions yet.
     `fll_run_template.py`.
 - [ ] **2.8 Save and load.** Autosave to browser storage; export/import the run
   `.json`; a list of the team's runs.
+  - *Optional, and the one real gain from self-hosting:* a small storage API in
+    the container — `GET/PUT /runs/<name>.json` against a mounted folder — so a
+    run planned on one laptop opens on another, instead of being passed around
+    as a file. It brings its own questions: who may overwrite whose run, and
+    what backs the folder up. Keep browser storage as the fallback so the
+    planner still works when the host is unreachable.
+- [ ] **2.9 Work without the host.** A service worker caching the bundle, the
+  Pyodide runtime and the wheel, so the planner still opens in a gym where the
+  tailnet or the VPS cannot be reached. This is what a self-hosted page has to
+  earn back: a CDN-fed static site got it almost for free. Needs the HTTPS from
+  2.1, since a service worker will not register without it.
+  - *Done when:* the container is stopped, the page is reloaded, and a run can
+    still be planned, checked and downloaded.
 
 ---
 
@@ -445,7 +488,10 @@ Order these after watching the kids use phase 3.
 - [ ] **4.5** Speed-limit (constraints marker) blocks for slow, careful sections.
 - [ ] **4.6** Hub memory budget: total bytes across all runs in the selector.
 - [ ] **4.7** *(stretch)* Send straight to the hub over Web Bluetooth, the way
-  code.pybricks.com does.
+  code.pybricks.com does. Needs the secure context from 2.1.
+- [ ] **4.8** Sharpen the offline story: check what actually survives a
+  competition venue with no route to the host, and whether the service worker
+  from 2.9 covers it.
 
 ---
 
@@ -559,7 +605,7 @@ Decide when we reach the step named. The recommendation is the default.
 
 | Decision | Step | Recommendation |
 |---|---|---|
-| Public GitHub Pages site or private? The site includes the team robot photo and the field image derived from FIRST's PDF. | 2.1 | Private repo with Pages limited to the team, or an unlisted URL |
+| Run the container on the VPS, or at home behind Tailscale? | 2.1 (first deploy) | Depends on who must reach it: Tailscale is private and gets HTTPS for free, but every kid's device has to be on the tailnet. The VPS is reachable from anywhere, and then wants some access control of its own. |
 | Upstream the headless refactor to omegacoreFLL/PythFinder, or keep it in our fork? | end of 1 | Offer upstream once goldens prove nothing changed |
 | One fixed team robot, or editable robot settings? | 4.2 | Fixed for the season; editable behind the mentor toggle |
 | How `run()` gets the data on the hub (`fromValues` vs a module self-import) | 3.1 | Whichever works on the hub; test both |
@@ -568,12 +614,17 @@ Decide when we reach the step named. The recommendation is the default.
 
 - **Silent behaviour change in the refactor.** Mitigated by the golden files in
   1.1, captured before any edit.
-- **Pyodide first load on school Wi-Fi.** Measured in step 1.8 on a home
-  connection: 3.6s for the Pyodide runtime, 1.5s to install the library. The
-  library's own wheel is 0.11MB once slimmed — it would have been 13.5MB
-  unslimmed, which is why `tools/slim_wheel.py` exists. Cached after the first
-  visit. Still worth testing on the school's actual network before a practice
-  session.
+- **First load, and where it comes from.** Step 1.8 measured 3.6s for the
+  Pyodide runtime and 1.5s to install the library, fetched from a CDN on a home
+  connection. Served from our own container it should be no slower, and cannot
+  be blocked by a school firewall. The library's wheel is 0.11MB once slimmed —
+  13.5MB unslimmed, which is why `tools/slim_wheel.py` exists. Cached after the
+  first visit either way.
+- **The host has to be reachable, and has to stay up.** Self-hosting trades "a
+  CDN might be blocked" for "our machine might be unreachable": a gym with no
+  route to the tailnet, or a VPS nobody noticed had stopped. The service worker
+  in 2.9 covers planning offline. Anything kept only on the host — the shared
+  runs in 2.8 — is not covered by it, and wants a backup.
 - **Hub heap.** Each run is roughly 6 bytes per exported state (about 16 KB for
   the template run). Several long runs in one program add up, hence 4.6.
 - **Kids writing blocking custom actions.** Blocks cannot block; the code editor
