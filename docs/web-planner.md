@@ -234,15 +234,35 @@ today.
   says which tool wrote the file — ours does not claim to be `txt_to_py.py`.
   The tests compare everything after it, which is all the data the hub reads.
 
-- [ ] **1.6 Diagnostics as data.** Replace the `print()` warnings in the builder
-  with a list of `Diagnostic(level, step_index, message, suggestion)` on the
-  builder, and still print them on desktop. Cover at least:
-  - a marker outside its segment, and so discarded;
-  - an empty trajectory;
-  - an int16 overflow in the export;
-  - *(new)* the robot footprint leaving the mat.
-  - *Done when:* a test builds a run with an out-of-range marker and gets one
-    diagnostic that says which step it is on.
+- [x] **1.6 Diagnostics as data.**
+  - `Trajectory/diagnostics.py` holds `Diagnostic(level, message, step,
+    suggestion, time_ms)`, with `as_dict()` for the browser. The builder
+    collects them on `self.diagnostics` and hands them to the trajectory; it
+    still prints them, so the desktop behaves as before. Set
+    `builder.print_diagnostics = False` for quiet.
+  - Covered: an action past the end of its step, an action counted back from
+    the end to before the step starts, an action outside the whole run, an
+    empty run, and the robot going off the mat.
+  - Messages name the step and say what to do: *"an action 80cm into this step
+    was dropped, because the step only goes as far as 10cm — try: put the
+    action before 10cm, or make the step longer."*
+  - **The mat check is new.** `Trajectory/field.py` holds `Field` and
+    `FLL_FIELD`, and `constants.py` now takes the table size from there, so it
+    is written down once. The builder rotates the robot's four corners along
+    the path — every fifth state, since at full speed the robot covers about
+    3mm in 5ms — and reports the worst excursion with the step and the time it
+    happens. The simulator path measures against the preset's own image size,
+    so the FTC field works too.
+  - *Done:* 71 tests pass, goldens byte-identical, and the simulator still
+    opens, follows and draws.
+
+  **Fixed on the way:** building a run with no steps used to crash with an
+  `IndexError`, because an empty trajectory has no last state to read a time
+  from. It now reports an error diagnostic and hands back an empty trajectory.
+
+  **Left as an exception:** an int16 overflow in the hub export still raises
+  from `hubModule`, because there is no file to hand over — a diagnostic would
+  imply the run was usable. Step 1.7 catches it and reports it as an error.
 
 - [ ] **1.7 The run description and `build_run`.**
   - Define the JSON a run is saved as (see *Run file format* below).
@@ -441,6 +461,16 @@ Neither is caused by this work, and neither blocks it.
   joystick control, which is presumably why nobody has hit it. A guard that
   skips the derivative term when no time has passed would fix it; doing so
   changes simulator behaviour, so it wants a deliberate decision.
+- [ ] **`rotate_by` reflects as well as rotating.** Both
+  `mathEx.Point.rotate_by` (`mathEx.py:55`) and the free `rotate_by`
+  (`mathEx.py:274`) compute `y = x·sin − y·cos`, where a rotation needs
+  `x·sin + y·cos`. As written they rotate *and* mirror across the x axis. The
+  method also mutates the point it is called on and returns it, so a caller
+  that expects a copy silently corrupts its input. Used by the holonomic
+  field-centric joystick path in `core.py:188`, which the team's tank drive
+  never reaches, and by nothing in the trajectory maths — the goldens are
+  unaffected. Step 1.6 rotates its own corners rather than depend on it. Fixing
+  it needs a look at whether any caller has been compensating for the mirror.
 - [ ] **The swerve export is malformed.** In the wheel-speeds export, the swerve
   branch formats `(power, 2)` — a tuple — where it plainly meant
   `round(power, 2)`, so a swerve robot's file gets `(46.66, 2) 30.0` instead of
