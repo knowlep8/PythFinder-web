@@ -1,0 +1,37 @@
+# Deploying is `git pull && docker compose up -d --build` on whichever machine
+# hosts this -- the VPS, or the one at home behind a Cloudflare tunnel.
+
+services:
+  planner:
+    build: .
+    image: pythfinder-planner
+    restart: unless-stopped
+
+    # Bound to localhost on purpose. Nothing should reach this directly: put
+    # Cloudflare in front, so the team is gated by an Access policy rather than
+    # by whoever finds the address.
+    #
+    # To try it locally, open http://127.0.0.1:8080
+    ports:
+      - "127.0.0.1:8080:80"
+
+  # The tunnel, for the home machine. No inbound port is opened: cloudflared
+  # dials out to Cloudflare and the page is served from there over HTTPS, which
+  # is also what the service worker (step 2.9) and Web Bluetooth (4.7) need.
+  #
+  # Create the tunnel in the Cloudflare dashboard, point it at
+  # http://planner:80, then put the token in a .env file next to this one:
+  #
+  #     TUNNEL_TOKEN=...
+  #
+  # On the VPS, use whatever reverse proxy is already there instead, and leave
+  # this commented out.
+  #
+  # cloudflared:
+  #   image: cloudflare/cloudflared:latest
+  #   restart: unless-stopped
+  #   command: tunnel --no-autoupdate run
+  #   environment:
+  #     TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env}
+  #   depends_on:
+  #     - planner

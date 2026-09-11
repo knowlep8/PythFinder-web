@@ -1,0 +1,22 @@
+# Keep the build context small and reproducible. The image builds the wheel
+# and the site from source; nothing already built on a laptop should leak in.
+
+.git
+.github
+.venv
+__pycache__
+*.pyc
+*.egg-info
+
+dist
+dist-web
+build
+
+web/node_modules
+web/dist
+web/public/pyodide
+web/public/*.whl
+
+docs
+tests
+.vscode
