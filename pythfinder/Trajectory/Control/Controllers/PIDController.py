@@ -38,9 +38,17 @@ class PIDController():
                   error: int | float):
         
         self.__current_time = milliseconds_since_start()
+        elapsed = self.__current_time - self.__past_time
 
         self.__proportional = error
-        self.__derivative = (error - self.__past_error) / (self.__current_time - self.__past_time)
+
+        # The clock counts whole milliseconds, so two calls can land in the same
+        # one -- at the simulator's 1000 FPS ceiling that happens constantly.
+        # Dividing by that gap would raise ZeroDivisionError, so the previous
+        # derivative is held instead: no time has passed, so nothing has changed.
+        if elapsed > 0:
+            self.__derivative = (error - self.__past_error) / elapsed
+
         self.__integral += error
 
         power = self.__proportional * self.__coeff.kP + self.__integral * self.__coeff.kI + self.__derivative * self.__coeff.kD 
