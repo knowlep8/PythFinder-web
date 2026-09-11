@@ -34,3 +34,8 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 include = ["pythfinder*"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

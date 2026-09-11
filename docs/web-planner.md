@@ -104,19 +104,31 @@ Goal: `build_run(run_description) -> result` works in a Python with **no pygame,
 matplotlib or screeninfo installed**, and produces byte-identical output to
 today.
 
-- [ ] **1.1 Capture golden outputs *before* changing anything.**
-  - Add `pytest` as a dev dependency (`uv add --dev pytest`).
-  - Write `tests/golden_runs.py` with a handful of runs that together cover:
-    `inLineCM` (forward, backward, merged consecutive), `wait`, `turnToDeg`
-    (both directions), `toPoint`, `toPointTangentHead`, `toPose`,
-    `toPoseTangentHead`, `toPoseLinearHead`, `reversed=True`, relative
-    displacement/temporal markers including negative values, an absolute
-    marker, a constraints marker, and an interrupt marker. Include the
-    `fll_run_template.py` run.
-  - Export each with today's code (`SDL_VIDEODRIVER=dummy`) into
-    `tests/golden/<name>.txt`, and commit them.
-  - *Done when:* the golden files are committed, and a test regenerates them
-    and compares byte-for-byte.
+- [x] **1.1 Capture golden outputs *before* changing anything.**
+  - `pytest` added as a dev dependency.
+  - `tests/golden_runs.py` holds 19 runs covering `inLineCM` (forward,
+    backward, merged consecutive), `wait` (merged), `turnToDeg` (both
+    directions and reversed), `toPoint`, `toPointTangentHead`, `toPose`,
+    `toPoseTangentHead`, `toPoseLinearHead`, `reversed = True`, relative
+    displacement and temporal markers including a negative one, absolute
+    markers, a constraints marker, an interrupt marker, and the
+    `fll_run_template.py` run at both 6 ms and 1 ms per state.
+  - `tests/regenerate_goldens.py` rewrites them; `tests/test_goldens.py`
+    compares byte-for-byte and points at the regenerate command when they
+    differ.
+  - *Done:* 24 tests pass. `tests/golden/template_run.txt` is **byte-identical
+    to `Trajectory/TXT/run_a.txt` in the quick-start repo**, the file currently
+    on the hub, so the reference set is anchored to the real robot.
+
+  **Found while doing this:** on a tank drive the heading variants are not
+  distinct. `PointSegment` and `PoseSegment` force `tangent = True` and
+  `linear_head = False` whenever the chassis is `NON_HOLONOMIC`
+  (`pointSegment.py:34`, `poseSegment.py:35`), because a robot that cannot move
+  sideways must point along its line of travel. So `toPoint` ==
+  `toPointTangentHead`, and `toPose` == `toPoseTangentHead` ==
+  `toPoseLinearHead`. Only `reversed`, and the final turn `toPose` adds, change
+  the motion. This is asserted in `test_heading_modes_collapse_on_a_tank_drive`
+  and it changes what step 2.4 should offer.
 
 - [ ] **1.2 Remove the tiny imports.**
   - `mathEx.py`: drop `import pygame`; make the `pygame_vector_to_point` hint a
@@ -213,11 +225,14 @@ working hub file. No actions yet.
   - Drive (cm, forward/back) → `inLineCM`
   - Turn to heading (deg, reversed) → `turnToDeg`
   - Wait (ms) → `wait`
-  - Go to point / Go to pose, each with heading modes and reversed →
-    `toPoint*` / `toPose*`
+  - Go to point, with a "drive there backwards" tick → `toPoint`
+  - Go to pose (a point plus a heading to finish on), with the same tick →
+    `toPose`
 
-  `inSpline` is not offered (it is a no-op today). Selecting a step highlights
-  its part of the path.
+  No heading-mode choice: step 1.1 established that the variants collapse on a
+  tank drive, so offering them would be three buttons that do the same thing.
+  `inSpline` is not offered either (it is a no-op today). Selecting a step
+  highlights its part of the path.
 - [ ] **2.5 Path and playback.** Draw the path from `poses`. Play/pause and a
   time scrubber animate the robot along it, with a readout of time, step and
   pose.
