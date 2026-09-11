@@ -11,7 +11,7 @@ def main():
 
         # 2. Define a starting pose for the robot (x, y, angle)
         #    The origin (0,0) is the center of the field.
-        start_pose = pythfinder.Pose(x=-50, y=-50, head=45)
+        start_pose = pythfinder.Pose(x=-53, y=-85, head=0)
 
         # 3. Create a TrajectoryBuilder, passing preset=1 to use the FLL table.
         #    The preset is automatically applied.
