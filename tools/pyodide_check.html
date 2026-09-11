@@ -1,0 +1,146 @@
+<!doctype html>
+<!--
+  Proves the planning half of PythFinder runs in a browser.
+
+  Loads Pyodide, installs the library as a wheel, builds the run from
+  fll_run_template.py, and checks the result against the numbers in the file
+  currently on the hub. This is the evidence for step 1.8 of
+  docs/web-planner.md, and the seed of the real page in step 2.2.
+
+  To run it:
+
+      uv build --wheel --out-dir dist
+      python tools/slim_wheel.py dist/pythfinder-*.whl --out-dir dist-web
+      cp tools/pyodide_check.html dist-web/index.html
+      python3 -m http.server 8765 --bind 127.0.0.1 --directory dist-web
+
+  then open http://127.0.0.1:8765/ and read the page, or the console.
+-->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>PythFinder in Pyodide</title>
+  <style>
+    body { font: 14px ui-monospace, monospace; margin: 24px; background: #111; color: #eee; }
+    pre { white-space: pre-wrap; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <h1>PythFinder in a browser</h1>
+  <pre id="log">starting...</pre>
+
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.28.0/full/pyodide.js"></script>
+  <script>
+    const target = document.getElementById("log");
+
+    function log(line) {
+      target.textContent += "\n" + line;
+      console.log("[check] " + line);
+    }
+
+    function since(start) {
+      return ((performance.now() - start) / 1000).toFixed(1) + "s";
+    }
+
+    async function main() {
+      target.textContent = "";
+
+      let mark = performance.now();
+      const pyodide = await loadPyodide();
+      log("pyodide loaded in " + since(mark));
+
+      mark = performance.now();
+      await pyodide.loadPackage("micropip");
+
+      // whatever slim_wheel.py wrote next to this page
+      const wheel = "pythfinder-0.0.5.2-py3-none-any.whl";
+
+      await pyodide.runPythonAsync(`
+import micropip
+await micropip.install("${wheel}", deps = False)
+`);
+      log("wheel installed in " + since(mark));
+
+      mark = performance.now();
+      const summary = await pyodide.runPythonAsync(`
+import json, sys, time
+
+from pythfinder.headless import build_run
+
+# the run from fll_run_template.py, described as data
+RUN = {
+    "version": 1, "name": "run_a", "steps_ms": 6, "robot": "fll_team",
+    "start": {"x": -46, "y": -83, "head": 0},
+    "steps": [
+        {"type": "drive", "cm": 75,
+         "actions": [{"id": "arm_down", "at": {"cm": 35}}]},
+        {"type": "wait", "ms": 600},
+        {"type": "turn", "deg": 90},
+        {"type": "drive", "cm": 30,
+         "actions": [{"id": "arm_up", "at": {"ms": -1}}]},
+        {"type": "toPose", "x": -46, "y": -83, "head": 0},
+    ],
+}
+
+started = time.time()
+result = build_run(RUN)
+built_in = time.time() - started
+
+lines = result["module_text"].splitlines()
+def line_for(prefix):
+    return next(line for line in lines if line.startswith(prefix))
+
+json.dumps({
+    "python": sys.version.split()[0],
+    "ok": result["ok"],
+    "total_ms": result["total_ms"],
+    "poses": len(result["poses"]),
+    "markers": [m["id"] + "@" + str(m["time_ms"]) for m in result["markers"]],
+    "diagnostics": [d["message"] for d in result["diagnostics"]],
+    "steps_line": line_for("STEPS"),
+    "markers_line": line_for("MARKERS"),
+    "count_line": line_for("COUNT"),
+    "module_bytes": len(result["module_text"]),
+    "build_seconds": round(built_in, 3),
+})
+`);
+      const data = JSON.parse(summary);
+      log("build_run ran in " + since(mark));
+      log("");
+      log("python " + data.python);
+      log("ok: " + data.ok + "   total_ms: " + data.total_ms +
+          "   poses: " + data.poses);
+      log("markers: " + data.markers.join(", "));
+      log("diagnostics: " + (data.diagnostics.join(" | ") || "none"));
+      log(data.steps_line + "   " + data.markers_line + "   " + data.count_line);
+      log("module is " + data.module_bytes + " bytes, built in " +
+          data.build_seconds + "s");
+      log("");
+
+      // what the hub is running today
+      const expected = {
+        steps_line: "STEPS = 6",
+        markers_line: "MARKERS = (1764, 7942)",
+        count_line: "COUNT = 2607",
+        total_ms: 15641,
+      };
+
+      const wrong = Object.keys(expected).filter(key => data[key] !== expected[key]);
+
+      if (wrong.length === 0) {
+        log("RESULT: PASS - the browser produced the same file as the hub has");
+        document.title = "PASS";
+      } else {
+        log("RESULT: FAIL - " + wrong.map(k => k + " was " + data[k]).join(", "));
+        document.title = "FAIL";
+      }
+    }
+
+    main().catch(error => {
+      log("RESULT: FAIL - " + error);
+      document.title = "FAIL";
+      console.error(error);
+    });
+  </script>
+</body>
+</html>
