@@ -35,10 +35,15 @@ class TrajectoryGenerator():
         # second layer --> steps
         return first_string + '\n' + "{0}\n".format(steps)
 
-    def wheel_speeds_text(self, steps: int = 1, separate_lines: bool = False) -> str:
-        text = self.__header(steps)
+    def wheel_speed_groups(self, steps: int = 1):
+        """Walk the states, collapsing runs of identical ones.
 
-        # third layer --> wheel velocities -- head -- nr of consecutive copies
+        Yields (wheel_states, head, copies): the speed of each wheel, the
+        heading to hold, and how many consecutive states said the same thing.
+
+        Both exports are built from this -- the .txt the simulator writes and
+        the hub module -- so the two cannot end up describing different motion.
+        """
         rg = int(len(self.STATES) / steps)
         t = 0
 
@@ -54,9 +59,17 @@ class TrajectoryGenerator():
                     t += 1
             except: pass
 
-            # write velocities for each wheel, acording to the kinematics
+            # velocities for each wheel, acording to the kinematics
             robot_centric_vel = current_state.velocities.field_to_robot(current_state.pose)
             wheel_states = self.robot.kinematics.inverse(robot_centric_vel)
+
+            yield wheel_states, current_state.pose.head, consecutive
+
+    def wheel_speeds_text(self, steps: int = 1, separate_lines: bool = False) -> str:
+        text = self.__header(steps)
+
+        # third layer --> wheel velocities -- head -- nr of consecutive copies
+        for wheel_states, head, consecutive in self.wheel_speed_groups(steps):
 
             if isinstance(self.robot.kinematics, SwerveKinematics):
                 # add module angles too
@@ -65,7 +78,7 @@ class TrajectoryGenerator():
                 line = ''.join(str(round(self.robot.to_motor_power(state.VELOCITY), 2)) + " " for state in wheel_states)
 
             line = line + "{0} {1} ".format(
-                round(current_state.pose.head, 2),
+                round(head, 2),
                 consecutive)
 
             if separate_lines:

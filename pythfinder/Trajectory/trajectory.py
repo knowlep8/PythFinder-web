@@ -4,6 +4,9 @@ from pythfinder.Trajectory.Markers import *
 from pythfinder.Trajectory.trajectoryGenerator import *
 from pythfinder.Trajectory.robotConfig import RobotConfig
 
+# safe to import at the top: the hub export needs nothing but struct
+from pythfinder.Export.hubModule import hub_module_text
+
 # A built trajectory: the motion states, the markers, and the robot they were
 # planned for.
 #
@@ -30,6 +33,15 @@ class Trajectory():
         self.trajGenerator = TrajectoryGenerator(motion_states, markers, robot)
         self.trajFollower = None
         self.trajGrapher = None
+
+    # the module the hub imports, as text, without writing it
+    def hub_module(self, name: str = "trajectory", steps: int = 1) -> str:
+        """Ready to save as <name>.py and upload to the hub.
+
+        Replaces the separate tools/txt_to_py.py step: no .txt has to exist
+        first, which is what lets a browser produce a finished file.
+        """
+        return hub_module_text(self.trajGenerator, name, steps)
 
     # the text that would be written to the .txt, without writing it
     def text(self,
