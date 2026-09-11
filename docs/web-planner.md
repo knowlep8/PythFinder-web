@@ -64,10 +64,11 @@ Settled unless we find a reason to revisit them.
    library in the browser with **Pyodide**. We do not port it to JavaScript: two
    copies drift, and the hub output must match the desktop tool exactly.
 2. **Served from our own container, and still a static bundle.** A Docker image
-   (Vite build → nginx) runs on the team's VPS, or on a machine at home reached
-   over Tailscale. Having a server is a deployment convenience, not a reason to
-   move the maths onto it: the page stays static and all the Python still runs
-   in the browser, so the planner keeps working at a venue once it is loaded.
+   (Vite build → nginx) runs on the team's VPS, or on a machine at home put
+   online through a Cloudflare tunnel. Having a server is a deployment
+   convenience, not a reason to move the maths onto it: the page stays static
+   and all the Python still runs in the browser, so the planner keeps working
+   at a venue once it is loaded.
    Pyodide and the wheel are **vendored into the image** rather than pulled from
    a CDN, so nothing external is needed at run time and a locked-down school
    network cannot break it. Runs are saved in the browser and
@@ -355,12 +356,20 @@ working hub file. No actions yet.
     download and never changes between releases, so serve it immutable and let
     the small bundle revalidate.
   - **HTTPS is not optional.** A service worker (2.9) and Web Bluetooth (4.7)
-    both require a secure context. On the VPS that means a reverse proxy with a
-    real certificate; over Tailscale, `tailscale serve` puts the container
-    behind an HTTPS name on the tailnet with the certificate handled for us.
-  - *Decision here:* VPS or home-plus-Tailscale — see *Open decisions*. The
-    image is the same either way, so this can be deferred until the first
-    deploy.
+    both require a secure context. Cloudflare terminates TLS at its edge, so
+    either host gets that for free: on the home machine a `cloudflared` tunnel
+    means no inbound port is opened at all, and the tunnel can run as a second
+    service in the same compose file.
+  - **Let Cloudflare do the gatekeeping**, rather than building a login into the
+    page. An Access policy in front of the hostname lets the team in by email
+    and keeps everyone else out, and the same policy covers the storage API in
+    2.8 if we build it.
+  - Check that the edge actually caches the vendored Pyodide: the `.wasm` and
+    data files are the bulk of the download, and a cache rule may be needed for
+    them. That, not the container, decides how the first load feels from a
+    kid's house.
+  - *Decision here:* VPS or home-behind-a-tunnel — see *Open decisions*. The
+    image is the same either way, so this can wait until the first deploy.
   - *Done when:* `docker compose up` on the host serves a page that loads
     Pyodide from the same origin and reports the Python version, with no
     network requests leaving the host.
@@ -410,10 +419,15 @@ working hub file. No actions yet.
     what backs the folder up. Keep browser storage as the fallback so the
     planner still works when the host is unreachable.
 - [ ] **2.9 Work without the host.** A service worker caching the bundle, the
-  Pyodide runtime and the wheel, so the planner still opens in a gym where the
-  tailnet or the VPS cannot be reached. This is what a self-hosted page has to
-  earn back: a CDN-fed static site got it almost for free. Needs the HTTPS from
-  2.1, since a service worker will not register without it.
+  Pyodide runtime and the wheel, so the planner still opens in a gym with no
+  usable internet. This is what a hosted page has to earn back: everything now
+  depends on reaching Cloudflare, and a competition venue is exactly where that
+  fails. Needs the HTTPS from 2.1, since a service worker will not register
+  without it.
+  - **Never cache a login redirect.** With Access in front, an expired session
+    answers a fetch with a redirect to a login page. A service worker that
+    stores that as if it were the app will serve it back forever. Cache only
+    same-origin 200s, and version the cache on each deploy.
   - *Done when:* the container is stopped, the page is reloaded, and a run can
     still be planned, checked and downloaded.
 
@@ -605,7 +619,7 @@ Decide when we reach the step named. The recommendation is the default.
 
 | Decision | Step | Recommendation |
 |---|---|---|
-| Run the container on the VPS, or at home behind Tailscale? | 2.1 (first deploy) | Depends on who must reach it: Tailscale is private and gets HTTPS for free, but every kid's device has to be on the tailnet. The VPS is reachable from anywhere, and then wants some access control of its own. |
+| Run the container on the VPS, or at home behind a Cloudflare tunnel? | 2.1 (first deploy) | Either works and the image is identical; Cloudflare answers "who can reach it" with an Access policy rather than with network membership, so the kids need nothing installed. Pick on where the box should live: the VPS is already up and maintained, the home machine costs nothing and opens no port. |
 | Upstream the headless refactor to omegacoreFLL/PythFinder, or keep it in our fork? | end of 1 | Offer upstream once goldens prove nothing changed |
 | One fixed team robot, or editable robot settings? | 4.2 | Fixed for the season; editable behind the mentor toggle |
 | How `run()` gets the data on the hub (`fromValues` vs a module self-import) | 3.1 | Whichever works on the hub; test both |
@@ -621,10 +635,15 @@ Decide when we reach the step named. The recommendation is the default.
   13.5MB unslimmed, which is why `tools/slim_wheel.py` exists. Cached after the
   first visit either way.
 - **The host has to be reachable, and has to stay up.** Self-hosting trades "a
-  CDN might be blocked" for "our machine might be unreachable": a gym with no
-  route to the tailnet, or a VPS nobody noticed had stopped. The service worker
-  in 2.9 covers planning offline. Anything kept only on the host — the shared
-  runs in 2.8 — is not covered by it, and wants a backup.
+  CDN might be blocked" for a longer chain that all has to work: the venue's
+  internet, Cloudflare, the tunnel, and the container. A competition gym is
+  where that chain is weakest. The service worker in 2.9 covers planning
+  offline; anything kept only on the host — the shared runs in 2.8 — is not
+  covered by it, and wants a backup.
+- **An expired Access session looks like a broken app.** The team opens the
+  planner and gets a login page, or worse, a half-working one if the service
+  worker has cached around it. Worth deciding how long sessions last before the
+  kids meet it mid-practice.
 - **Hub heap.** Each run is roughly 6 bytes per exported state (about 16 KB for
   the template run). Several long runs in one program add up, hence 4.6.
 - **Kids writing blocking custom actions.** Blocks cannot block; the code editor
