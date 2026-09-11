@@ -340,7 +340,7 @@ today.
 Goal: plan a run with drive/turn/wait/go-to steps, watch it, and download a
 working hub file. No actions yet.
 
-- [ ] **2.1 Scaffold `web/`, and the container that serves it.** Vite +
+- [x] **2.1 Scaffold `web/`, and the container that serves it.** Vite +
   TypeScript. Keep dependencies minimal; a small UI library such as Preact is
   fine if the step list gets fiddly.
   - A multi-stage `Dockerfile`:
@@ -370,9 +370,26 @@ working hub file. No actions yet.
     kid's house.
   - *Decision here:* VPS or home-behind-a-tunnel — see *Open decisions*. The
     image is the same either way, so this can wait until the first deploy.
-  - *Done when:* `docker compose up` on the host serves a page that loads
-    Pyodide from the same origin and reports the Python version, with no
-    network requests leaving the host.
+  - *Done:* the built page loads Pyodide from its own origin in 1.8s — against
+    3.6s from a CDN in step 1.8 — unpacks the library in 0.1s, and builds the
+    template run in 0.6s, reporting Python 3.13.2 and the same `STEPS = 6`,
+    `MARKERS = (1764, 7942)`, `COUNT = 2607` the hub is running. Chrome's
+    network log shows **8 requests, all to this host**: the page, the bundle,
+    five Pyodide files and the wheel.
+
+  **No package installer.** The plan said `micropip.install(wheel, deps=False)`.
+  The page fetches the wheel and hands it to `pyodide.unpackArchive` instead: a
+  wheel is a zip, this one has no dependencies, and micropip would itself have
+  had to be served from the image. One fewer thing to vendor, and the same
+  result.
+
+  **Not yet verified: the image.** Docker is not installed on the machine this
+  was built on, so `docker compose up --build` has never run. What was checked
+  instead: every path the `Dockerfile` copies exists and is not excluded by
+  `.dockerignore`, and the `npm ci` lockfile is committed. The first deploy on
+  the VPS or the home host is therefore also the first real test of the build —
+  expect to fix something there, and do it before a practice session rather
+  than during one.
 - [ ] **2.2 Python worker.** Run Pyodide in a Web Worker so the page never
   freezes. Message shape: `{run} -> {poses, markers, diagnostics, moduleText}`.
   Both the runtime and the wheel come from our own container, so the first visit
