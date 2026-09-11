@@ -86,7 +86,18 @@ default_unit_size = 3
 default_backing_distance = 1
 
 
-if default_system_font not in pygame.font.get_fonts():
+def check_font_available():
+    """Stop with an explanation if the interface font is not installed.
+
+    Called when a Simulator is created, because that is when text first gets
+    drawn. It used to run while this module was being imported, which meant
+    anything importing the library needed the font -- including a headless
+    export with no window at all, and the web planner, which draws its own
+    interface and never uses this font.
+    """
+    if default_system_font in pygame.font.get_fonts():
+        return
+
     font_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'Font'))
 
     print("\n\nunable to find the default font '{0}'.".format(default_system_font))
@@ -833,34 +844,22 @@ ftc_center_stage_field_image = pygame.image.load(os.path.join(device_relative_pa
 
 
 
-# the team's robot, measured on the build
-fll_robot_width_cm = 19    # side to side, across the wheels
-fll_robot_length_cm = 14   # front to back
+# The team's robot. The measurements themselves now live in
+# pythfinder/Trajectory/robotConfig.py, which imports nothing but maths, so the
+# web planner can describe the robot without pygame. They are pulled back in
+# here under the names they have always had, for default_presets below and for
+# any team script that imports them.
+from pythfinder.Trajectory.robotConfig import (FLL_ROBOT,
+                                               fll_center_offset,
+                                               fll_real_max_velocity,
+                                               fll_robot_length_cm,
+                                               fll_robot_width_cm,
+                                               fll_track_width_cm)
 
 # a top-down photo of the actual robot. The sprite is scaled with its axes
 # transposed and then rotated, which works out to: the FRONT of the robot must
 # point at the LEFT edge of the source image.
 fll_robot_image_source = os.path.join(device_relative_path, 'Robot/fll_robot_team.png')
-
-# center_offset points from the robot's geometric centre to the centre it turns
-# about, in robot coordinates with +x forward. The axle sits 3.5cm from the back
-# of a 14cm robot, so 3.5cm behind the centre.
-fll_center_offset = Point(-3.5, 0)
-
-# distance between the two drive wheels, centre to centre - measured on the
-# build. Every turn is scaled by this, so a wrong value makes turns
-# consistently over- or under-shoot.
-fll_track_width_cm = 16
-
-# top speed at full power, in cm/s. This converts a planned speed into a motor
-# power, so if it is wrong every straight comes out the wrong length. Measured
-# on the robot with measure_max_velocity.py: three runs averaging 64.3 cm/s
-# with a 1.8 cm/s spread, at 8.23V.
-#
-# This is the robot's ceiling, not the speed runs are planned at - that is the
-# linear constraint below, deliberately left lower so the heading PID has power
-# left to correct with.
-fll_real_max_velocity = 64.3
 
 # the BIOGLOW field is a white line drawing, so the FLL preset runs a light theme:
 # a white-on-black interface is unreadable on top of it
@@ -882,10 +881,11 @@ default_presets = [["FLL Table",
                                                 robot_img_source = fll_robot_image_source,
                                                 robot_width = fll_robot_width_cm,
                                                 robot_height = fll_robot_length_cm,
-                                                constraints2d = Constraints2D(track_width = fll_track_width_cm),
-                                                real_max_velocity = fll_real_max_velocity,
-                                                kinematics = TankKinematics(fll_track_width_cm,
-                                                                            center_offset = fll_center_offset)),
+                                                # copies, so the preset cannot
+                                                # mutate the shared description
+                                                constraints2d = FLL_ROBOT.constraints.copy(),
+                                                real_max_velocity = FLL_ROBOT.REAL_MAX_VEL,
+                                                kinematics = FLL_ROBOT.kinematics.copy()),
                     fll_bioglow_table_image,
                     Size(fll_table_width_cm, fll_table_height_cm),
                     1],

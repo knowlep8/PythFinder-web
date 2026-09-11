@@ -30,6 +30,11 @@ class Simulator():
         Args:
             constants (Constants): The constants object containing simulation parameters.
         """
+        # the interface draws every label in this font, so it has to be there
+        # before a window opens. Checked here rather than at import time, so
+        # that importing the library does not require it
+        check_font_available()
+
         pygame.display.set_caption("PythFinder")
         
         self.running = BooleanEx(True)
