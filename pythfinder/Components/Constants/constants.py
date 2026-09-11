@@ -816,11 +816,12 @@ img_rectangle_cursor = pygame.transform.scale(img_rectangle_cursor, (32, 32))
 
 
 # FLL
-# no FIRST document states the mat size, so it is measured off the 20cm reference grid
-# in the official wireframe PDF. Re-derive with:
-#   python tools/build_field_image.py --calibrate
-fll_table_width_cm = 200.5
-fll_table_height_cm = 114.3 # lands exactly on the familiar 45in
+# the mat's size lives in Trajectory/field.py, which imports no pygame, so that
+# the planner can work out whether a path runs off the table
+from pythfinder.Trajectory.field import FLL_FIELD
+
+fll_table_width_cm = FLL_FIELD.WIDTH_CM
+fll_table_height_cm = FLL_FIELD.HEIGHT_CM
 
 fll_bioglow_table_source = 'Field/FLL_table_BG.png'
 fll_bioglow_table_image = pygame.image.load(os.path.join(device_relative_path, fll_bioglow_table_source))

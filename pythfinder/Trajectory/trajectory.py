@@ -21,14 +21,21 @@ class Trajectory():
                  motion_states: List[MotionState],
                  markers: List[FunctionMarker],
                  robot: RobotConfig,
-                 sim = None) -> None:
+                 sim = None,
+                 diagnostics: list = None) -> None:
 
         self.STATES = motion_states
         self.MARKERS = markers
         self.robot = robot
         self.sim = sim
 
-        self.TIME = self.STATES[-1].time
+        # what the builder noticed on the way: markers it had to drop, a path
+        # that leaves the mat. See Trajectory/diagnostics.py
+        self.diagnostics = [] if diagnostics is None else diagnostics
+
+        # a run with no steps in it has no last state to ask. The builder
+        # records a diagnostic saying so, rather than crashing here
+        self.TIME = self.STATES[-1].time if self.STATES else 0
 
         self.trajGenerator = TrajectoryGenerator(motion_states, markers, robot)
         self.trajFollower = None

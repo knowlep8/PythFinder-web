@@ -6,6 +6,8 @@ from pythfinder.Trajectory.Segments import *
 from pythfinder.Trajectory.robotConfig import (FLL_ROBOT,
                                                RobotConfig,
                                                robot_from_constants)
+from pythfinder.Trajectory.diagnostics import Diagnostic
+from pythfinder.Trajectory.field import Field, FLL_FIELD
 
 # for marker sorting
 type_priority = {
@@ -79,6 +81,17 @@ class TrajectoryBuilder():
                                  else robot_from_constants(self.sim.constants))
 
 
+
+        # problems found while building, kept as data: the simulator prints
+        # them, the web planner puts them next to the step that caused them
+        self.diagnostics: List[Diagnostic] = []
+        self.print_diagnostics = True
+
+        # which step is being processed, for diagnostics to point at
+        self.__step = None
+
+        # the mat a path is expected to stay on
+        self.field = self.__field_from_preset()
 
         self.START_POSE = Pose() if start_pose is None else start_pose
 
@@ -285,6 +298,9 @@ class TrajectoryBuilder():
 
     def build(self) -> Trajectory:
 
+        self.diagnostics = []
+        self.__step_ends = []
+
         self.last_state = MotionState(pose = self.START_POSE)
         self.pose = self.START_POSE.copy()
 
@@ -294,10 +310,12 @@ class TrajectoryBuilder():
 
 
         for i in range(self.segment_number):
+            self.__step = i
+
             sgm: MotionSegment = self.segments[i]
             markers: List[Marker] | None = self.relative_markers[i]
 
-            # recursively compleate each 
+            # recursively compleate each
             if sgm.last_state is None:
                 sgm: MotionSegment = sgm.copy(self.last_state.copy(), self.CONSTRAINTS)
 
@@ -310,13 +328,95 @@ class TrajectoryBuilder():
             # combine states from the primitive into one state
             self.states += sgm.get_all()
             self.TRAJ_TIME += sgm.total_time
+            self.__step_ends.append(self.TRAJ_TIME)
 
             self.last_state = sgm.states[-1]
-        
+
+        self.__step = None
+
+        # nothing to drive, and nothing below would survive an empty list
+        if not self.states:
+            self.__report(Diagnostic.error(
+                "this run has no steps in it, so there is nothing to drive",
+                suggestion = "add a move, a turn or a wait"))
+
+            return Trajectory(self.states, self.final_markers,
+                              self.robot_config, self.sim, self.diagnostics)
 
         self.__process_final_function_markers()
+        self.__check_the_path_stays_on_the_field()
+
         return Trajectory(self.states, self.final_markers,
-                          self.robot_config, self.sim)
+                          self.robot_config, self.sim, self.diagnostics)
+
+
+
+    # every fifth state is enough: at full speed the robot covers about 3mm in
+    # 5ms, so nothing slips across the edge and back between two samples
+    FIELD_CHECK_EVERY = 5
+
+    def __check_the_path_stays_on_the_field(self):
+        """Warn if any corner of the robot ends up off the mat."""
+        half_length = self.robot_config.LENGTH_CM / 2
+        half_width = self.robot_config.WIDTH_CM / 2
+
+        if half_length == 0 and half_width == 0:
+            return  # nothing is known about the robot's size
+
+        worst = 0
+        worst_time = None
+
+        for i in range(0, len(self.states), self.FIELD_CHECK_EVERY):
+            state = self.states[i]
+            over = self.__how_far_off_the_field(state.pose, half_length, half_width)
+
+            if over > worst:
+                worst = over
+                worst_time = state.time
+
+        if worst_time is None:
+            return
+
+        self.__report(Diagnostic.warning(
+            "the robot goes off the {0} during this run, by {1}cm at the worst point"
+                .format(self.field.name if self.field.name else "field",
+                        round(worst, 1)),
+            step = self.__step_at_time(worst_time),
+            time_ms = worst_time,
+            suggestion = "keep the path further from the edge, or start further in"))
+
+    def __how_far_off_the_field(self, pose: Pose, half_length: float, half_width: float) -> float:
+        """How far the worst corner of the robot lies past an edge, in cm.
+
+        The corners are rotated here rather than with mathEx.rotate_by, which
+        reflects as well as rotates -- see docs/web-planner.md.
+        """
+        radians = math.radians(pose.head)
+        cos, sin = math.cos(radians), math.sin(radians)
+
+        over = 0
+
+        for forward in (half_length, -half_length):     # robot +x is forwards
+            for left in (half_width, -half_width):      # robot +y is to its left
+                corner = Point(pose.x + forward * cos - left * sin,
+                               pose.y + forward * sin + left * cos)
+
+                over = max(over, self.field.outside_by(corner))
+
+        return over
+
+    def __step_at_time(self, time_ms: int):
+        """Which step was running at this point in the trajectory.
+
+        The comparison includes the end of a step: a segment's last state is
+        timed at the running total, so the final moment of the run would
+        otherwise belong to no step at all.
+        """
+        for step, ends_at in enumerate(self.__step_ends):
+            if time_ms <= ends_at:
+                return step
+
+        return None
 
 
         
@@ -365,11 +465,16 @@ class TrajectoryBuilder():
 
                 if positive >= segment.states[0].displacement:    # check if it's still in the segment
                     marker.displacement = positive   # if so, update marker
-                else: 
+                else:
                     remove.append(i)                 # else remove marker, because it's impossible
-                    
-                    print("\n\nyour displacement marker with value {0} is outside".format(marker.displacement))
-                    print("of the segment by {0}cm. It will be discarded".format(segment.states[0].displacement - positive))
+
+                    self.__report(Diagnostic.warning(
+                        "an action {0}cm from the end of this step was dropped, "
+                        "because that is {1}cm before the step begins"
+                        .format(abs(marker.displacement),
+                                round(segment.states[0].displacement - positive, 2)),
+                        step = self.__step,
+                        suggestion = "count back a smaller distance, or make the step longer"))
             
         for index in remove:
             markers.pop(index - removed)
@@ -450,7 +555,7 @@ class TrajectoryBuilder():
                     self.__find_segm_time_from_displacement(the_chosen_one.displacement, segment))
             
             if not segment.time_in_segment_segm_time(time): # marker is not in the segment
-                self.__print_marker_not_in_segment_error(the_chosen_one, segment)
+                self.__report_marker_not_in_segment(the_chosen_one, segment)
                 continue
 
             self.CONSTRAINTS = the_chosen_one.constraints
@@ -472,7 +577,7 @@ class TrajectoryBuilder():
                     self.__find_segm_time_from_displacement(the_chosen_one.displacement, segment))
             
             if not segment.time_in_segment_segm_time(time): # marker is not in the segment
-                self.__print_marker_not_in_segment_error(the_chosen_one, segment)
+                self.__report_marker_not_in_segment(the_chosen_one, segment)
                 continue
 
             segment.interrupt_segm_time(time)
@@ -489,7 +594,7 @@ class TrajectoryBuilder():
                     self.__find_segm_time_from_displacement(current.displacement, segment))
             
             if not segment.time_in_segment_segm_time(time): # marker is not in the segment
-                self.__print_marker_not_in_segment_error(current, segment)
+                self.__report_marker_not_in_segment(current, segment)
                 continue
 
             self.final_markers.append(FunctionMarker(time = segment.states[time].time,
@@ -535,7 +640,7 @@ class TrajectoryBuilder():
                         marker.displacement = positive   # if so, update marker
                     else: 
                         remove.append(i)                 # else remove marker, because it's impossible
-                        self.__print_marker_not_in_trajectory_error(marker)
+                        self.__report_marker_not_in_trajectory(marker)
             
             else:
                 if marker.time < 0:
@@ -545,7 +650,7 @@ class TrajectoryBuilder():
                         marker.time = positive
                     else:
                         remove.append(i)
-                        self.__print_marker_not_in_trajectory_error(marker)
+                        self.__report_marker_not_in_trajectory(marker)
                         
         for index in remove:
             self.final_markers.pop(index - removed)
@@ -592,30 +697,50 @@ class TrajectoryBuilder():
 
 
 
-    def __print_marker_not_in_segment_error(self, marker: Marker, segment: MotionSegment):
-        print("\n\nthere is no motion state at {0}{1} in this segment"
-                  .format(marker.time if marker.time is not None else round(marker.displacement - segment.states[0].displacement, 2),
-                          "ms" if marker.time is not None else "cm"))
-        print("the supported range is: ({0}, {1}) {2}"
-                  .format(0, 
-                          
-                                len(segment.states) - 1 
-                          if marker.time is not None else 
-                                round(segment.states[-1].displacement - segment.states[0].displacement, 2),
+    def __field_from_preset(self) -> Field:
+        """The mat to measure against: the preset's, or the FLL table."""
+        if self.preset is None or self.preset.img_size_cm is None:
+            return FLL_FIELD
 
-                          "ms" if marker.time is not None else "cm"))
+        return Field(self.preset.img_size_cm.width,
+                     self.preset.img_size_cm.height,
+                     self.preset.name)
 
-    def __print_marker_not_in_trajectory_error(self, marker: Marker):
-        print("\n\nthere is no motion state at {0}{1} in this trajectory"
-                  .format(marker.time if marker.time is not None else round(marker.displacement, 2),
-                          "ms" if marker.time is not None else "cm"))
-        print("the supported range is: ({0}, {1}) {2}"
-                  .format(0, 
-                                len(self.states) - 1 
-                          if marker.time is not None else 
-                                round(self.states[-1].displacement, 2),
+    def __report(self, diagnostic: Diagnostic):
+        """Record a problem, and say it out loud unless asked not to."""
+        self.diagnostics.append(diagnostic)
 
-                          "ms" if marker.time is not None else "cm"))
+        if self.print_diagnostics:
+            print("\n\n{0}".format(diagnostic))
+
+    def __report_marker_not_in_segment(self, marker: Marker, segment: MotionSegment):
+        if marker.time is not None:
+            asked_for = "{0}ms".format(marker.time)
+            as_long_as = "{0}ms".format(len(segment.states) - 1)
+        else:
+            asked_for = "{0}cm".format(round(marker.displacement - segment.states[0].displacement, 2))
+            as_long_as = "{0}cm".format(round(segment.states[-1].displacement - segment.states[0].displacement, 2))
+
+        self.__report(Diagnostic.warning(
+            "an action {0} into this step was dropped, because the step only "
+            "goes as far as {1}".format(asked_for, as_long_as),
+            step = self.__step,
+            suggestion = "put the action before {0}, or make the step longer"
+                         .format(as_long_as)))
+
+    def __report_marker_not_in_trajectory(self, marker: Marker):
+        if marker.time is not None:
+            asked_for = "{0}ms".format(marker.time)
+            as_long_as = "{0}ms".format(len(self.states) - 1)
+        else:
+            asked_for = "{0}cm".format(round(marker.displacement, 2))
+            as_long_as = "{0}cm".format(round(self.states[-1].displacement, 2))
+
+        self.__report(Diagnostic.warning(
+            "an action {0} into the run was dropped, because the whole run only "
+            "goes as far as {1}".format(asked_for, as_long_as),
+            suggestion = "put the action before {0}, or add more steps"
+                         .format(as_long_as)))
 
 
 
