@@ -83,6 +83,18 @@
       .step .title { min-width: 92px; }
       .step .took { margin-left: auto; color: #8a8f98; font-size: 12px; }
 
+      /* a left accent, so it does not fight the selected and running borders */
+      .step.troubled { border-left: 3px solid #ff8a80; }
+
+      .problem {
+        flex-basis: 100%;      /* its own line inside the wrapped row */
+        margin: 5px 0 1px;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .problem.warning { color: #ffca7a; }
+      .problem.error { color: #ff8a80; }
+
       .step label { display: inline-flex; align-items: center; gap: 3px; color: #8a8f98; }
       .step label.reversed { gap: 5px; }
 
@@ -122,8 +134,8 @@
   <body>
     <h1>PythFinder planner</h1>
     <p class="sub">
-      Step 2.5 — press play to watch the run, or drag the slider through it.
-      Space plays and pauses.
+      Step 2.6 — problems appear on the step that caused them, and anywhere the
+      robot hangs off the mat is marked in red. Press play to watch the run.
     </p>
 
     <div class="wrap">

@@ -16,7 +16,7 @@
  * keystroke.
  */
 
-import type { BuiltStep, RunStep, StepType } from "./types";
+import type { BuiltStep, Diagnostic, RunStep, StepType } from "./types";
 
 export interface RunEditorHandlers {
   onChange?: (steps: RunStep[]) => void;
@@ -77,6 +77,7 @@ export class RunEditor {
   private handlers: RunEditorHandlers;
   private steps: RunStep[];
   private times: BuiltStep[] = [];
+  private problems: Diagnostic[] = [];
   private selected: number | null = null;
 
   constructor(
@@ -103,6 +104,12 @@ export class RunEditor {
   setTimes(times: BuiltStep[]) {
     this.times = times;
     this.showTimes();
+  }
+
+  /** What went wrong, to be shown against the steps that caused it. */
+  setProblems(problems: Diagnostic[]) {
+    this.problems = problems;
+    this.showProblems();
   }
 
   private changed() {
@@ -196,6 +203,35 @@ export class RunEditor {
 
     this.container.append(this.renderAdders());
     this.showTimes();
+    this.showProblems();
+  }
+
+  /**
+   * Put each problem on the step that caused it.
+   *
+   * A warning about step 4 belongs on step 4, not in a list at the bottom that
+   * nobody reads. Run-wide problems have no step to sit on and stay in the
+   * panel below.
+   */
+  private showProblems() {
+    for (const row of this.container.querySelectorAll<HTMLElement>(".step")) {
+      const index = Number(row.dataset.index);
+      const mine = this.problems.filter((problem) => problem.step === index);
+
+      row.querySelectorAll(".problem").forEach((old) => old.remove());
+      row.classList.toggle("troubled", mine.length > 0);
+
+      for (const problem of mine) {
+        const line = document.createElement("p");
+
+        line.className = `problem ${problem.level}`;
+        line.textContent =
+          problem.message +
+          (problem.suggestion === null ? "" : ` — try: ${problem.suggestion}`);
+
+        row.append(line);
+      }
+    }
   }
 
   private renderStep(step: RunStep, index: number): HTMLElement {

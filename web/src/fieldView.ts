@@ -45,6 +45,7 @@ export class FieldView {
   private path: PathPose[] = [];
   private highlight: { from: number; to: number } | null = null;
   private playhead: FieldPose | null = null;
+  private offMat: Array<[number, number]> = [];
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -82,6 +83,7 @@ export class FieldView {
   /** The path the robot will take, as the worker last worked it out. */
   setPath(path: PathPose[]) {
     this.path = path;
+    this.offMat = this.findOffMat();
     this.draw();
   }
 
@@ -129,48 +131,72 @@ export class FieldView {
 
     this.drawPath();
     this.drawRobot();
+
+    // After the robot, deliberately. The commonest way to hang off the mat is
+    // to turn on the spot at the edge, which puts the mark exactly where the
+    // robot is standing -- drawn first, it is painted over and invisible.
+    this.strokeOffMat(Math.max(1.5, this.view.scale * 0.22));
   }
 
-  /** The whole path, with the selected step's share of it picked out. */
+  /** The path: the whole run, the selected step, and any trouble. */
   private drawPath() {
     if (this.path.length < 2) {
       return;
     }
 
+    const thin = Math.max(1.5, this.view.scale * 0.22);
+
+    this.strokeRange(0, this.path.length - 1, "#5b2ea6", thin);
+    this.strokeHighlight(thin);
+  }
+
+  private strokeRange(from: number, to: number, colour: string, width: number) {
     const { context, view } = this;
 
-    const stroke = (from: number, to: number, colour: string, width: number) => {
-      context.strokeStyle = colour;
-      context.lineWidth = width;
-      context.lineJoin = "round";
-      context.lineCap = "round";
+    context.strokeStyle = colour;
+    context.fillStyle = colour;
+    context.lineWidth = width;
+    context.lineJoin = "round";
+    context.lineCap = "round";
+
+    // a single point has no line to draw, and a zero-length stroke paints
+    // nothing at all
+    if (to <= from) {
+      const point = fieldToScreen(this.path[from], view);
+
       context.beginPath();
+      context.arc(point.x, point.y, width / 2, 0, Math.PI * 2);
+      context.fill();
 
-      for (let i = from; i <= to; i++) {
-        const point = fieldToScreen(this.path[i], view);
+      return;
+    }
 
-        if (i === from) {
-          context.moveTo(point.x, point.y);
-        } else {
-          context.lineTo(point.x, point.y);
-        }
+    context.beginPath();
+
+    for (let i = from; i <= to; i++) {
+      const point = fieldToScreen(this.path[i], view);
+
+      if (i === from) {
+        context.moveTo(point.x, point.y);
+      } else {
+        context.lineTo(point.x, point.y);
       }
+    }
 
-      context.stroke();
-    };
+    context.stroke();
+  }
 
-    const thin = Math.max(1.5, view.scale * 0.22);
-    stroke(0, this.path.length - 1, "#5b2ea6", thin);
-
+  private strokeHighlight(thin: number) {
     if (this.highlight === null) {
       return;
     }
 
+    const { context, view } = this;
     const first = this.indexAt(this.highlight.from);
     const last = this.indexAt(this.highlight.to);
 
     if (last > first && this.spanCm(first, last) >= 1) {
-      stroke(first, last, "#ff6d00", thin * 2.2);
+      this.strokeRange(first, last, "#ff6d00", thin * 2.2);
       return;
     }
 
@@ -188,6 +214,71 @@ export class FieldView {
     context.strokeStyle = "#ffffff";
     context.lineWidth = Math.max(1, thin * 0.5);
     context.stroke();
+  }
+
+  /** Paint the stretches where a corner of the robot is off the mat. */
+  private strokeOffMat(thin: number) {
+    const { context, view } = this;
+
+    for (const [from, to] of this.offMat) {
+      // Turning on the spot at the edge is the commonest way to hang off the
+      // mat, and it covers no ground: as a line it is a couple of pixels wide,
+      // hidden under the robot. Ring the spot instead.
+      if (this.spanCm(from, to) < 1) {
+        const point = fieldToScreen(this.path[from], view);
+
+        // big enough to ring the robot rather than hide inside it: the robot
+        // is about 19cm across, so this clears it
+        const radius = (ROBOT.widthCm * 0.8) * view.scale;
+
+        context.strokeStyle = "#ff1744";
+        context.lineWidth = Math.max(2.5, thin * 1.2);
+        context.beginPath();
+        context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+        context.stroke();
+
+        continue;
+      }
+
+      this.strokeRange(from, to, "#ff1744", thin * 1.3);
+    }
+  }
+
+  /**
+   * Which stretches of the path hang off the mat.
+   *
+   * Worked out here rather than asked for, because the worker's warning says
+   * when the worst moment is, not how long the trouble lasts. The geometry is
+   * the same either way: the four corners of the robot, turned to face the way
+   * it is going.
+   *
+   * Done once per build. Playback redraws sixty times a second, and this walks
+   * every pose.
+   */
+  private findOffMat(): Array<[number, number]> {
+    const ranges: Array<[number, number]> = [];
+    let from: number | null = null;
+
+    for (let i = 0; i < this.path.length; i++) {
+      const off = robotCorners(this.path[i]).some(
+        (corner) =>
+          Math.abs(corner.x) > FIELD.heightCm / 2 ||
+          Math.abs(corner.y) > FIELD.widthCm / 2,
+      );
+
+      if (off && from === null) {
+        from = i;
+      } else if (!off && from !== null) {
+        ranges.push([from, i - 1]);
+        from = null;
+      }
+    }
+
+    if (from !== null) {
+      ranges.push([from, this.path.length - 1]);
+    }
+
+    return ranges;
   }
 
   /** How far the path gets from where the stretch started, in cm. */

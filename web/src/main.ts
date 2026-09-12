@@ -200,6 +200,7 @@ async function main() {
 
     view.setPath(result.poses);
     editor.setTimes(result.steps);
+    editor.setProblems(result.diagnostics);
     applyHighlight();
 
     scrub.max = String(result.total_ms);
@@ -214,14 +215,18 @@ async function main() {
 
     output.textContent = "";
 
+    // Anything about a particular step now sits on that step. What is left is
+    // trouble with the run as a whole, which has no row to sit on.
+    const runWide = result.diagnostics.filter((problem) => problem.step === null);
+
     if (trouble === 0) {
       log("no problems");
-      return;
+    } else if (runWide.length === 0) {
+      log("problems are marked on the steps that caused them");
     }
 
-    for (const problem of result.diagnostics) {
-      const where = problem.step === null ? "" : ` (step ${problem.step + 1})`;
-      log(`${problem.level}${where}: ${problem.message}`);
+    for (const problem of runWide) {
+      log(`${problem.level}: ${problem.message}`);
 
       if (problem.suggestion !== null) {
         log(`    try: ${problem.suggestion}`);
