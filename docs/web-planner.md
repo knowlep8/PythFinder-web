@@ -520,8 +520,37 @@ working hub file. No actions yet.
   part-way through this step — in a fresh tab as well, after the same actions
   had worked minutes earlier — so the 0° readout and the space binding have not
   been seen working. Worth a glance next time the page is open by hand.
-- [ ] **2.6 Problems panel.** Show `diagnostics` next to the step they refer
-  to, in kid-friendly words. Paint the path red where the robot leaves the mat.
+- [x] **2.6 Problems panel.**
+  - Each problem now sits on the step that caused it, with its suggestion, and
+    that row gets a red edge. A warning about step 4 belongs on step 4, not in
+    a list at the bottom that nobody reads. Only run-wide problems — the ones
+    with no step to sit on — stay in the panel below.
+  - Anywhere the robot hangs off the mat is marked in red on the path.
+
+  **The page works out the off-mat stretches itself**, rather than asking for
+  them: the worker's warning says when the *worst* moment is, not how long the
+  trouble lasts. The geometry is the same either way — four corners turned to
+  face the way the robot is going — and it is computed once per build, because
+  playback redraws sixty times a second.
+
+  **Two rounds of guessing, settled by measuring.** The mark would not appear.
+  I assumed the excursion was too brief to survive the 20ms thinning of the
+  poses, and then that a thin line was hiding under the sprite. Reading the
+  canvas pixels directly showed **zero** of the marker's colour, and running
+  the page's own range-finding over real pose data showed it was working
+  perfectly: two ranges, at t 14001-14401ms and t 14661-14961ms, each spanning
+  **0.00cm** — the robot turning on the spot at the edge of the table. The
+  marks were being drawn at the robot's own position, before the robot, and
+  painted over.
+
+  So they are drawn after the robot now, and ringed wide enough to clear it.
+  The same pixel probe went from 0 to 1131 pixels of `#ff1744`, clustered on
+  the launch area where the pirouette happens.
+
+  **The lesson worth keeping:** a marker that lands where the robot stands is
+  the normal case here, not the exception — turning on the spot at a table edge
+  is how an FLL run usually misbehaves. Step 2.4 learned the same thing about
+  selecting a turn.
 - [ ] **2.7 Download.** Run name field (must be a valid Python module name, so
   validate it). Download `run_<name>.py`. Show state count, run length and bytes
   on the hub.
