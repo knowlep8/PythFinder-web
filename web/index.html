@@ -123,6 +123,24 @@
       .adders { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
       .empty { color: #8a8f98; }
 
+      h2.spaced { margin-top: 20px; }
+      .save { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      .save label { display: inline-flex; align-items: center; gap: 5px; color: #8a8f98; }
+      .cost { color: #8a8f98; font-size: 12px; }
+
+      input[type="text"] {
+        padding: 3px 6px;
+        font: inherit;
+        color: #e6e6e6;
+        background: #101214;
+        border: 1px solid #333a42;
+        border-radius: 4px;
+      }
+      input[type="text"]:focus { outline: 1px solid #00e5ff; }
+      input.wrong { border-color: #ff8a80; }
+
+      button:disabled { opacity: 0.45; cursor: not-allowed; }
+
       pre {
         white-space: pre-wrap;
         line-height: 1.6;
@@ -134,8 +152,8 @@
   <body>
     <h1>PythFinder planner</h1>
     <p class="sub">
-      Step 2.6 — problems appear on the step that caused them, and anywhere the
-      robot hangs off the mat is marked in red. Press play to watch the run.
+      Step 2.7 — name the run and download the file the hub imports. Problems
+      appear on the step that caused them; press play to watch it drive.
     </p>
 
     <div class="wrap">
@@ -163,6 +181,15 @@
       <div class="right">
         <h2>Steps</h2>
         <div id="steps"></div>
+
+        <h2 class="spaced">For the hub</h2>
+        <div class="save">
+          <label>name <input id="name" type="text" value="run_a" size="12" /></label>
+          <button id="save" type="button">Download .py</button>
+          <span id="cost" class="cost">—</span>
+        </div>
+        <p id="nameproblem" class="problem error" hidden></p>
+
         <pre id="log">starting...</pre>
       </div>
     </div>

@@ -11,6 +11,7 @@ import { FieldView } from "./fieldView";
 import { Playback } from "./playback";
 import { RunEditor } from "./runEditor";
 import { createPlanner } from "./planner";
+import { hubCost, nameProblem, saveModule } from "./download";
 import { normaliseHead } from "./field";
 import type { FieldPose } from "./field";
 import type { BuildResult, PathPose, Run, RunStep } from "./types";
@@ -41,6 +42,11 @@ const playButton = document.getElementById("play") as HTMLButtonElement;
 const scrub = document.getElementById("scrub") as HTMLInputElement;
 const nowReadout = document.getElementById("now") as HTMLElement;
 const totalReadout = document.getElementById("total") as HTMLElement;
+
+const nameBox = document.getElementById("name") as HTMLInputElement;
+const saveButton = document.getElementById("save") as HTMLButtonElement;
+const costReadout = document.getElementById("cost") as HTMLElement;
+const nameProblemLine = document.getElementById("nameproblem") as HTMLElement;
 
 let pose: FieldPose = { ...START };
 let latest: BuildResult | null = null;
@@ -168,12 +174,41 @@ async function main() {
   function currentRun(): Run {
     return {
       version: 1,
-      name: "run_a",
+      // the name goes into the file's own docstring, so it follows the box
+      name: nameProblem(nameBox.value) === null ? nameBox.value : "run",
       steps_ms: 6,
       robot: "fll_team",
       start: { x: pose.x, y: pose.y, head: pose.head },
       steps: editor.getSteps(),
     };
+  }
+
+  /**
+   * Can this run be handed over, and what does it cost the hub?
+   *
+   * The name has to be a Python identifier: the hub imports the file by name,
+   * and a team member who types "Run 1" would find that out at a competition
+   * rather than here.
+   */
+  function showSaveState() {
+    const problem = nameProblem(nameBox.value);
+    const module = latest?.module_text ?? null;
+
+    nameBox.classList.toggle("wrong", problem !== null);
+    nameProblemLine.textContent = problem ?? "";
+    nameProblemLine.hidden = problem === null;
+
+    saveButton.disabled = problem !== null || module === null;
+
+    if (module === null) {
+      costReadout.textContent = latest === null ? "—" : "nothing to send yet";
+      return;
+    }
+
+    const { states, bytes } = hubCost(module);
+
+    costReadout.textContent =
+      `${states} states, ${(bytes / 1024).toFixed(1)}KB on the hub`;
   }
 
   function rebuild() {
@@ -206,6 +241,7 @@ async function main() {
     scrub.max = String(result.total_ms);
     totalReadout.textContent = seconds(result.total_ms);
     playback.setDuration(result.total_ms);
+    showSaveState();
 
     const trouble = result.diagnostics.length;
 
@@ -234,6 +270,28 @@ async function main() {
     }
   }
 
+  nameBox.addEventListener("input", () => {
+    showSaveState();
+    rebuild();
+  });
+
+  saveButton.addEventListener("click", () => {
+    const module = latest?.module_text;
+
+    if (!module) {
+      return;
+    }
+
+    // an error means build_run could not produce a file worth driving
+    if (!latest?.ok) {
+      log("this run has a problem that has to be fixed before it can be saved");
+      return;
+    }
+
+    saveModule(nameBox.value, module);
+    log(`saved ${nameBox.value}.py — upload it at code.pybricks.com`);
+  });
+
   playButton.addEventListener("click", () => playback.toggle());
 
   scrub.addEventListener("input", () => {
@@ -251,6 +309,7 @@ async function main() {
   });
 
   showPose();
+  showSaveState();
   window.addEventListener("resize", () => view.resize());
 
   const { python, seconds: ready } = await planner.ready;
