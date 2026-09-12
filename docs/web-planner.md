@@ -456,19 +456,41 @@ working hub file. No actions yet.
   `head + 90` the simulator uses. `fll_run_template.py` described this as
   "counter-clockwise", which is true of the axes and misleading about the
   picture; its comment now says which way it looks.
-- [ ] **2.4 Step list.** Add, edit, reorder, delete. Step types, mapped 1:1 to
-  builder calls:
-  - Drive (cm, forward/back) → `inLineCM`
-  - Turn to heading (deg, reversed) → `turnToDeg`
-  - Wait (ms) → `wait`
-  - Go to point, with a "drive there backwards" tick → `toPoint`
-  - Go to pose (a point plus a heading to finish on), with the same tick →
-    `toPose`
+- [x] **2.4 Step list.**
+  - `src/runEditor.ts` lists the run as rows, one per builder call: Drive (cm,
+    negative for backwards), Turn to (deg), Wait (ms), Go to point and Go to
+    pose, the last three with a "backwards" tick. Add, reorder, delete, and
+    type into any number.
+  - No heading-mode choice and no splines, as decided in 1.1.
+  - Selecting a step lights its share of the path. The path itself is drawn
+    here rather than in 2.5, because there is nothing to light up without it;
+    2.5 still owns playback and the scrubber.
+  - *Done:* adding a Drive took the run from 15.6s to 17.7s and lit the new
+    leg; moving it up merged it with the drive above (3.2s, and the row below
+    reading "joined to the step above"); deleting it un-merged them and put the
+    run back to 15.6s. The mat warning re-attributed itself to the right step
+    at every stage.
 
-  No heading-mode choice: step 1.1 established that the variants collapse on a
-  tank drive, so offering them would be three buttons that do the same thing.
-  `inSpline` is not offered either (it is a no-op today). Selecting a step
-  highlights its part of the path.
+  **The contract grew a `steps` list.** Nothing said *when* each step ran, so
+  the page could not light one up. `build_run` now returns `starts_ms` and
+  `ends_ms` per described step, and `TrajectoryBuilder.step_ends` became public
+  to supply it. A step merged into the one before it reports its start and end
+  as the same moment — there is no separate acceleration profile to point at —
+  and the row says "joined to the step above" rather than claiming 0.0s.
+
+  **Two things only using it revealed:**
+
+  - **Selecting a turn showed nothing at all.** A turn on the spot has no
+    stretch of ground to colour, and most turns are on the spot. It now marks
+    the place instead, which is the same treatment merged steps needed.
+  - **"Go to pose" ran off the edge of the panel.** Three numbers, a tick, a
+    duration and three buttons do not fit one row, so its delete button could
+    not be reached. The rows wrap now.
+
+  **A rule for whoever touches the editor next:** the list is rebuilt for
+  structural changes only — adding, deleting, reordering, selecting. Typing
+  into a number must never rebuild it, or the box being typed into loses focus
+  on every keystroke.
 - [ ] **2.5 Path and playback.** Draw the path from `poses`. Play/pause and a
   time scrubber animate the robot along it, with a readout of time, step and
   pose.
