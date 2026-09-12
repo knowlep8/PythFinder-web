@@ -383,13 +383,33 @@ working hub file. No actions yet.
   had to be served from the image. One fewer thing to vendor, and the same
   result.
 
-  **Not yet verified: the image.** Docker is not installed on the machine this
-  was built on, so `docker compose up --build` has never run. What was checked
-  instead: every path the `Dockerfile` copies exists and is not excluded by
-  `.dockerignore`, and the `npm ci` lockfile is committed. The first deploy on
-  the VPS or the home host is therefore also the first real test of the build —
-  expect to fix something there, and do it before a practice session rather
-  than during one.
+  **The image builds, and the container serves it.** `docker compose up -d
+  --build` produces it; the page then starts Pyodide from
+  `http://127.0.0.1:8080/pyodide/` in 1.3s and builds the run, and Chrome's
+  network log shows nine requests, **every one to the container**.
+
+  Two faults only a real build could have found:
+
+  - **nginx serves `.mjs` as `application/octet-stream`**, because its
+    `mime.types` has no entry for it — and a browser refuses to run that as a
+    module, while `curl` reports a cheerful 200 throughout. `nginx.conf` now
+    names the type for `.mjs` alone; everything else the runtime is made of
+    (`.wasm`, `.zip`, `.json`, `.js`) already had one, checked against the
+    running container.
+  - **`# syntax=docker/dockerfile:1` pulled a frontend image** from Docker Hub
+    on every build, and was the first thing to fail when a credential helper
+    was missing. Nothing here needs it, so it is gone: the three base images
+    are now all the build fetches.
+
+  The two Docker CLI traps that cost the first attempts — Homebrew's `docker`
+  without the compose plugin, and a `credsStore` naming a helper that is not on
+  the PATH — are written up in `web/README.md`, because anyone with Docker
+  Desktop and Homebrew on the same Mac will meet them.
+
+  **Left as it is for now:** a missing file answers with `index.html` rather
+  than a 404, because `try_files` falls back to the app. That is right for a
+  page with client-side state, but it means a typo'd asset path returns 200 and
+  HTML. Worth tightening once there is a real asset list to protect.
 - [ ] **2.2 Python worker.** Run Pyodide in a Web Worker so the page never
   freezes. Message shape: `{run} -> {poses, markers, diagnostics, moduleText}`.
   Both the runtime and the wheel come from our own container, so the first visit
@@ -570,7 +590,7 @@ As implemented in step 1.7 and understood by `build_run`.
 
 ## Found along the way
 
-Neither is caused by this work, and neither blocks it.
+None of these are caused by this work, and none of them block it.
 
 - [x] **The joystick heading PID divided by zero.** Fixed in `5e4dd06`: the gap
   is checked before dividing, and the previous derivative is held when no time
