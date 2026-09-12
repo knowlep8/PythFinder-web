@@ -665,12 +665,36 @@ working, correctly ordered marker functions.
       t.follow(core)
   ```
   so that `runs.py` needs only `import run_a` and `run_a.run(core)`.
-  - Add `Trajectory.fromValues(...)` to the hub's `trajectory.py`. A module
-    cannot easily pass *itself* to `Trajectory(module)` on MicroPython, so
-    **verify on the hub** before settling this.
-  - Update the quick-start README and `runs.py` example.
-  - *Done when:* a hand-written file in this shape runs on the hub with two
-    actions firing in order.
+  - `Trajectory.fromValues(steps, markers, count, data)` is in the hub's
+    `trajectory.py`. It builds a `_Values` holder and goes through `read()`, so
+    the two ways of building a trajectory share all their behaviour rather than
+    growing apart. The self-reference problem is sidestepped rather than
+    solved: the module passes its values, not itself.
+  - `example_run.py` is a hand-written run in the new shape, four states of
+    nonsense data so the shape is legible.
+  - The quick-start README documents it, next to — not instead of — the
+    existing two-file way, which is still the only way to drive a run until the
+    planner generates the new one in 3.2.
+  - **`runs.py` is left alone.** It has uncommitted changes of the team's in
+    it, and switching it over buys nothing until 3.2 exists.
+
+  *Checked in CPython, with Pybricks stubbed* (`trajectory.py` imported for
+  real, a fake clock so a 15s run takes a moment):
+
+  - a trajectory built from values is identical to one built from the module —
+    same STEPS, COUNT, TRAJ_TIME, DATA and marker times;
+  - driving the hub's own `traj_run_a`, both actions fired **in order**, at
+    wheel commands 293 and 1323 against markers at 1764ms and 7942ms
+    (÷ 6ms = 294 and 1323; the first fires just before that state's powers go
+    out), 2606 commands for 2607 states, motors stopped and drive braked;
+  - `example_run.run(core)` bound both actions and fired them in order, with
+    the wheels getting the powers its data encodes.
+
+  **Not done: the hub.** The *done when* asks for this on the robot, and there
+  is no robot here. What is untested is exactly what the stubs stand in for —
+  that MicroPython accepts a `@staticmethod` on that class, that the `lambda`
+  closures over `core` behave, and that the timing holds on real hardware.
+  Worth ten minutes with the hub before 3.2 builds on it.
 - [ ] **3.2 Action blocks.** Attach to a step at "X cm in", "X ms in", or
   "X before the end" (negative values, as the builder already supports).
   Offered blocks only use non-blocking calls, because markers run inline on the
