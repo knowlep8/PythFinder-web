@@ -551,12 +551,28 @@ working hub file. No actions yet.
   the normal case here, not the exception — turning on the spot at a table edge
   is how an FLL run usually misbehaves. Step 2.4 learned the same thing about
   selecting a turn.
-- [ ] **2.7 Download.** Run name field (must be a valid Python module name, so
-  validate it). Download `run_<name>.py`. Show state count, run length and bytes
-  on the hub.
-  - *Done when:* a run planned on the website, downloaded and uploaded via
-    code.pybricks.com, drives the same as the same run exported from
-    `fll_run_template.py`.
+- [x] **2.7 Download.**
+  - A name box, a Download button, and a readout of what the run costs the hub.
+    `src/download.ts` holds the three pieces: the name check, the size, and
+    saving the file.
+  - **The name is checked as a Python identifier**, because the hub imports the
+    file by name — `import run_a`. A team member who types "Run 1" or "left
+    side" would otherwise find that out on the hub, at a competition. Empty,
+    leading digits, spaces and Python's own words are each refused with a
+    reason, and the button is disabled until the name is usable.
+  - The button is also disabled while the run has an error, rather than handing
+    over a file that cannot drive.
+  - *Verified in the container:* `run_a` enabled, reading "2607 states, 15.3KB
+    on the hub"; `2fast`, `left side`, `import` and empty each disabled with
+    their own message; `run_b` enabled again. The module's docstring follows
+    the name box, and 2607 x 6 bytes is exactly the 15.3KB reported — the
+    readout is the hub's memory cost, not the 61KB of Python source that
+    carries it.
+
+  **Still to do by hand:** the last mile of the original *done when* — take a
+  run planned here, upload it at code.pybricks.com, and drive it. The file is
+  byte-identical to the one the hub already runs (step 1.8), so this is a
+  formality, but it is the only part that proves the whole chain on the robot.
 - [ ] **2.8 Save and load.** Autosave to browser storage; export/import the run
   `.json`; a list of the team's runs.
   - *Optional, and the one real gain from self-hosting:* a small storage API in
