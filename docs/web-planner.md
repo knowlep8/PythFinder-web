@@ -410,13 +410,30 @@ working hub file. No actions yet.
   than a 404, because `try_files` falls back to the app. That is right for a
   page with client-side state, but it means a typo'd asset path returns 200 and
   HTML. Worth tightening once there is a real asset list to protect.
-- [ ] **2.2 Python worker.** Run Pyodide in a Web Worker so the page never
-  freezes. Message shape: `{run} -> {poses, markers, diagnostics, moduleText}`.
-  Both the runtime and the wheel come from our own container, so the first visit
-  is a LAN-speed download rather than a trip to a CDN; show a loading screen for
-  it anyway, since it is still the slowest moment the kids will see.
-  Step 1.8 measured a rebuild at 0.49s in the browser against 38ms on the
-  desktop, so debounce the rebuild rather than running it on every keystroke.
+- [x] **2.2 Python worker.**
+  - `src/worker.ts` owns Pyodide. It says what it is doing while starting
+    (`status`), says `ready` once with the Python version, and answers each
+    `build` with a `built` or a `failed` carrying the same id. `build_run` is
+    kept as a Python callable, so a build is one call rather than a re-import.
+  - `src/planner.ts` is the page's side: `build(run)` for one specific run,
+    answered with a promise, and `request(run)` for the run as it currently
+    stands, answered through `onResult`. `request` waits 150ms for typing to
+    stop and never lets builds pile up — a newer run replaces a waiting one,
+    and an answer to a superseded request is dropped rather than drawn.
+  - `src/types.ts` mirrors the JSON contract from 1.7. It is one half of an
+    agreement with `pythfinder/headless.py`; that file's docstring is the
+    other.
+  - *Done:* in the container, the worker is ready in 4.0s from cold, builds the
+    template run in 0.61s, and returns the same `STEPS = 6`,
+    `MARKERS = (1764, 7942)`, `COUNT = 2607` as the hub. **Twenty edits as fast
+    as the page can make them cause one build**, and its result is the newest
+    edit's.
+
+  **The no-stall claim is not yet measured.** The page watches frame gaps while
+  building, which is the honest way to show the worker is doing its job — but
+  Chrome does not paint a tab that is not on screen, so an automated run
+  reports zero frames and the page says so rather than claiming a perfect
+  score. Open `http://127.0.0.1:8080` by hand to see a real number.
 - [ ] **2.3 Field view.** Canvas with the BIOGLOW image at true scale and the
   robot sprite. Coordinate helpers carry the +x-up / +y-right / CCW convention
   over from `Components/robot.py:106-114`. Show the mouse position in field cm.
