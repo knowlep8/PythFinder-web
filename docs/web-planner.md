@@ -491,9 +491,35 @@ working hub file. No actions yet.
   structural changes only — adding, deleting, reordering, selecting. Typing
   into a number must never rebuild it, or the box being typed into loses focus
   on every keystroke.
-- [ ] **2.5 Path and playback.** Draw the path from `poses`. Play/pause and a
-  time scrubber animate the robot along it, with a readout of time, step and
-  pose.
+- [x] **2.5 Path and playback.**
+  - `src/playback.ts` is the clock and nothing else: it walks a time from 0 to
+    the length of the run, in real time, and says where it has got to. A run
+    that takes 15 seconds on the mat takes 15 seconds here, which is the point
+    when the team is trying to fit inside two and a half minutes.
+  - Play, pause, a scrubber, and space to toggle. The readout shows the time,
+    which step is running, and the pose at that moment; the step's row is
+    outlined while it runs.
+  - Part-way through a run the robot stands at the playhead and the start pose
+    stays as an outline — it is still the thing you drag, and without it there
+    is no telling where the run begins.
+  - *Verified in the container:* at 7.1s of 15.6s the robot was drawn along the
+    path with the start pose outlined, the button read ⏸, the slider had
+    advanced, step 4's row was marked running, and the pose read
+    `x 29.0 y -62.8 head 90.0°` — which the run's own geometry confirms
+    (75cm up from x -46 is x 29, then a turn to 90 and 30cm along +y from
+    y -83). Seeking to the end put the robot home at `x -46.0 y -83.0`, as
+    `toPose(START)` requires.
+
+  **A readout bug the end of the run exposed:** the heading there read
+  `360.0°`, which is the same heading as 0 and looks like a mistake beside a
+  start pose of `0°`. It is normalised now.
+
+  **Honest limit on that last fix:** it is checked by arithmetic
+  (`normaliseHead(360) === 0`) and by reading the call site, not by a
+  screenshot. The browser stopped accepting synthetic clicks and key presses
+  part-way through this step — in a fresh tab as well, after the same actions
+  had worked minutes earlier — so the 0° readout and the space binding have not
+  been seen working. Worth a glance next time the page is open by hand.
 - [ ] **2.6 Problems panel.** Show `diagnostics` next to the step they refer
   to, in kid-friendly words. Paint the path red where the robot leaves the mat.
 - [ ] **2.7 Download.** Run name field (must be a valid Python module name, so
