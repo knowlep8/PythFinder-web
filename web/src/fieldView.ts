@@ -13,6 +13,7 @@ import {
   fitViewport,
   insideRobot,
   normaliseHead,
+  robotCorners,
   screenToField,
   spriteRotation,
   type FieldPoint,
@@ -43,6 +44,7 @@ export class FieldView {
   private dragging = false;
   private path: PathPose[] = [];
   private highlight: { from: number; to: number } | null = null;
+  private playhead: FieldPose | null = null;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -86,6 +88,12 @@ export class FieldView {
   /** Light up one stretch of the path, in trajectory milliseconds. */
   setHighlight(range: { from: number; to: number } | null) {
     this.highlight = range;
+    this.draw();
+  }
+
+  /** Stand the robot part-way through the run, or back at the start pose. */
+  setPlayhead(pose: FieldPose | null) {
+    this.playhead = pose;
     this.draw();
   }
 
@@ -213,23 +221,36 @@ export class FieldView {
   }
 
   private drawRobot() {
+    // Part-way through a run, the robot stands at the playhead and the start
+    // pose is left as an outline -- it is still the thing you drag, and
+    // without it there is no telling where the run begins.
+    if (this.playhead === null) {
+      this.drawRobotAt(this.pose);
+      return;
+    }
+
+    this.drawStartOutline();
+    this.drawRobotAt(this.playhead);
+  }
+
+  private drawRobotAt(pose: FieldPose) {
     const { context, view } = this;
-    const middle = fieldToScreen(this.pose, view);
+    const middle = fieldToScreen(pose, view);
 
     const length = ROBOT.lengthCm * view.scale;
     const width = ROBOT.widthCm * view.scale;
 
     context.save();
     context.translate(middle.x, middle.y);
-    context.rotate(spriteRotation(this.pose.head));
+    context.rotate(spriteRotation(pose.head));
     context.drawImage(this.robot, -length / 2, -width / 2, length, width);
     context.restore();
 
     // the nose, so which way it faces is obvious at a glance
     const nose = fieldToScreen(
       {
-        x: this.pose.x + Math.cos((this.pose.head * Math.PI) / 180) * ROBOT.lengthCm,
-        y: this.pose.y + Math.sin((this.pose.head * Math.PI) / 180) * ROBOT.lengthCm,
+        x: pose.x + Math.cos((pose.head * Math.PI) / 180) * ROBOT.lengthCm,
+        y: pose.y + Math.sin((pose.head * Math.PI) / 180) * ROBOT.lengthCm,
       },
       view,
     );
@@ -239,6 +260,30 @@ export class FieldView {
     context.beginPath();
     context.moveTo(middle.x, middle.y);
     context.lineTo(nose.x, nose.y);
+    context.stroke();
+  }
+
+  private drawStartOutline() {
+    const { context, view } = this;
+    const corners = robotCorners(this.pose).map((corner) =>
+      fieldToScreen(corner, view),
+    );
+
+    // robotCorners gives front-left, front-right, back-left, back-right, so
+    // walk them 0, 1, 3, 2 to go round the outside
+    const around = [corners[0], corners[1], corners[3], corners[2]];
+
+    context.strokeStyle = "#00e5ff80";
+    context.lineWidth = Math.max(1, view.scale * 0.15);
+    context.beginPath();
+    around.forEach((corner, i) => {
+      if (i === 0) {
+        context.moveTo(corner.x, corner.y);
+      } else {
+        context.lineTo(corner.x, corner.y);
+      }
+    });
+    context.closePath();
     context.stroke();
   }
 

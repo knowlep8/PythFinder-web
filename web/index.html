@@ -34,11 +34,22 @@
       }
       #field:focus-visible { outline: 2px solid #00e5ff; }
 
+      .transport {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-top: 10px;
+      }
+      #play { width: 42px; font-size: 15px; }
+      #scrub { flex: 1; accent-color: #ff6d00; }
+      .clock { color: #b9bec6; white-space: nowrap; }
+      .clock b { color: #e6e6e6; font-weight: 600; }
+
       .readout {
         display: flex;
         gap: 24px;
         flex-wrap: wrap;
-        margin: 10px 0 0;
+        margin: 8px 0 0;
         color: #b9bec6;
       }
       .readout b { color: #e6e6e6; font-weight: 600; }
@@ -67,6 +78,7 @@
         flex-wrap: wrap;
       }
       .step.selected { border-color: #ff6d00; background: #1d1a17; }
+      .step.running { border-color: #00e5ff; }
       .step .number { color: #6b7280; width: 16px; }
       .step .title { min-width: 92px; }
       .step .took { margin-left: auto; color: #8a8f98; font-size: 12px; }
@@ -110,17 +122,29 @@
   <body>
     <h1>PythFinder planner</h1>
     <p class="sub">
-      Step 2.4 — drag the robot to set where the run starts, then build the run
-      step by step. Click a step to light up its part of the path.
+      Step 2.5 — press play to watch the run, or drag the slider through it.
+      Space plays and pauses.
     </p>
 
     <div class="wrap">
       <div class="left">
         <canvas id="field"></canvas>
+
+        <div class="transport">
+          <button id="play" type="button" title="play the run (space)">▶</button>
+          <input id="scrub" type="range" min="0" max="100" step="10" value="0"
+                 title="scrub through the run" />
+          <span class="clock"><b id="now">0.0s</b> / <b id="total">—</b></span>
+        </div>
+
         <div class="readout">
           <span>start: <b id="pose">—</b></span>
           <span>mouse: <b id="mouse">—</b></span>
           <span>run: <b id="run">—</b></span>
+        </div>
+        <div class="readout">
+          <span>at this moment: <b id="atstep">—</b></span>
+          <span><b id="atpose">—</b></span>
         </div>
       </div>
 
