@@ -459,10 +459,28 @@ async function main() {
   show((await planner.build(currentRun())).result);
 }
 
-main().catch((error) => {
-  log("failed: " + error);
-  document.title = "FAIL";
-  console.error(error);
-});
+/**
+ * Keep working when the host cannot be reached.
+ *
+ * Registered after the page is up, so a worker that fails to install never
+ * stops the planner loading. Needs HTTPS, or localhost -- see 2.1.
+ */
+function keepOffline() {
+  if (!("serviceWorker" in navigator)) {
+    return;
+  }
+
+  navigator.serviceWorker.register("/sw.js").catch((error) => {
+    log("this page will not work offline: " + error);
+  });
+}
+
+main()
+  .then(keepOffline)
+  .catch((error) => {
+    log("failed: " + error);
+    document.title = "FAIL";
+    console.error(error);
+  });
 
 export {};
