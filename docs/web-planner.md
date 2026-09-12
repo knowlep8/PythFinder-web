@@ -605,16 +605,33 @@ working hub file. No actions yet.
     as a file. It brings its own questions: who may overwrite whose run, and
     what backs the folder up. Keep browser storage as the fallback so the
     planner still works when the host is unreachable.
-- [ ] **2.9 Work without the host.** A service worker caching the bundle, the
-  Pyodide runtime and the wheel, so the planner still opens in a gym with no
-  usable internet. This is what a hosted page has to earn back: everything now
-  depends on reaching Cloudflare, and a competition venue is exactly where that
-  fails. Needs the HTTPS from 2.1, since a service worker will not register
-  without it.
-  - **Never cache a login redirect.** With Access in front, an expired session
-    answers a fetch with a redirect to a login page. A service worker that
-    stores that as if it were the app will serve it back forever. Cache only
-    same-origin 200s, and version the cache on each deploy.
+- [x] **2.9 Work without the host.**
+  - `web/public/sw.js` keeps two caches: a shell for the page and its bundle,
+    replaced on every deploy, and a heavy one for Pyodide, the wheel and the
+    pictures — 12.7MB that does not change within a release. Bumping the
+    worker's `VERSION` throws away the shell and keeps the heavy things, so a
+    deploy costs kilobytes rather than another 13MB over school wifi.
+  - Only same-origin, non-redirected 200s are stored, so an expired Cloudflare
+    Access session cannot be filed away as if it were the app.
+  - nginx serves `/sw.js` with `no-cache`: a stale worker keeps control of the
+    page and would go on serving last week's planner after a deploy.
+  - *Done:* **container stopped, page reloaded, and the planner still opened,
+    started Python and built the full run** — 15.6s, five steps, the mat
+    warning on step 5, and the download button live. `docker compose ps`
+    showed `Exited (0)` and nothing was listening on the port.
+
+  **The bug that would have wasted a competition:** caching only on fetch left
+  the hashed bundle out. A worker takes control *after* the page load that
+  starts it, so a first visit never passes its own `/assets/index-HASH.js`
+  through the worker — the planner would cache 12.7MB of Pyodide and then
+  refuse to open for want of 21KB of script. The worker now reads the page
+  during install and precaches whatever it names.
+
+  **And a test that lied:** a `fetch("/index.html", {cache: "no-store"})` from
+  inside the page reported the host as reachable while the container was
+  stopped. `no-store` governs the browser's HTTP cache, not the service worker,
+  which answered from its own. A page controlled by a worker cannot tell
+  whether its host is up; that has to be checked from outside.
   - *Done when:* the container is stopped, the page is reloaded, and a run can
     still be planned, checked and downloaded.
 
