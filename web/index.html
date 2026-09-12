@@ -141,6 +141,19 @@
 
       button:disabled { opacity: 0.45; cursor: not-allowed; }
 
+      .spaced-small { margin-top: 6px; }
+
+      select {
+        font: inherit;
+        color: #e6e6e6;
+        background: #101214;
+        border: 1px solid #333a42;
+        border-radius: 4px;
+        padding: 3px 5px;
+        max-width: 190px;
+      }
+      select:focus { outline: 1px solid #00e5ff; }
+
       pre {
         white-space: pre-wrap;
         line-height: 1.6;
@@ -189,6 +202,20 @@
           <span id="cost" class="cost">—</span>
         </div>
         <p id="nameproblem" class="problem error" hidden></p>
+
+        <h2 class="spaced">Saved runs</h2>
+        <div class="save">
+          <button id="keep" type="button" title="save this run under its name">Save</button>
+          <select id="saved" title="open a saved run">
+            <option value="">— saved runs —</option>
+          </select>
+          <button id="forget" type="button" title="delete the selected run">Delete</button>
+        </div>
+        <div class="save spaced-small">
+          <button id="export" type="button" title="save the run as a file">Export .json</button>
+          <button id="import" type="button" title="open a run file">Import .json</button>
+          <input id="importfile" type="file" accept="application/json,.json" hidden />
+        </div>
 
         <pre id="log">starting...</pre>
       </div>

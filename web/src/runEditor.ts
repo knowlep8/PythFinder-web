@@ -96,6 +96,14 @@ export class RunEditor {
     return this.steps.map((step) => ({ ...step }));
   }
 
+  /** Replace the whole run, as when one is loaded or imported. */
+  setSteps(steps: RunStep[]) {
+    this.steps = steps.map((step) => ({ ...step }));
+    this.selected = null;
+
+    this.render();
+  }
+
   getSelected(): number | null {
     return this.selected;
   }
