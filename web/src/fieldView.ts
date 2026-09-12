@@ -19,6 +19,7 @@ import {
   type FieldPose,
   type Viewport,
 } from "./field";
+import type { PathPose } from "./types";
 
 export interface FieldViewHandlers {
   /** the start pose changed, because somebody dragged or turned the robot */
@@ -40,6 +41,8 @@ export class FieldView {
   private pose: FieldPose;
   private view: Viewport;
   private dragging = false;
+  private path: PathPose[] = [];
+  private highlight: { from: number; to: number } | null = null;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -74,6 +77,18 @@ export class FieldView {
     this.draw();
   }
 
+  /** The path the robot will take, as the worker last worked it out. */
+  setPath(path: PathPose[]) {
+    this.path = path;
+    this.draw();
+  }
+
+  /** Light up one stretch of the path, in trajectory milliseconds. */
+  setHighlight(range: { from: number; to: number } | null) {
+    this.highlight = range;
+    this.draw();
+  }
+
   /** Match the canvas to the space it has been given, and to the screen's dots. */
   resize() {
     const box = this.canvas.getBoundingClientRect();
@@ -104,7 +119,97 @@ export class FieldView {
       FIELD.heightCm * view.scale,
     );
 
+    this.drawPath();
     this.drawRobot();
+  }
+
+  /** The whole path, with the selected step's share of it picked out. */
+  private drawPath() {
+    if (this.path.length < 2) {
+      return;
+    }
+
+    const { context, view } = this;
+
+    const stroke = (from: number, to: number, colour: string, width: number) => {
+      context.strokeStyle = colour;
+      context.lineWidth = width;
+      context.lineJoin = "round";
+      context.lineCap = "round";
+      context.beginPath();
+
+      for (let i = from; i <= to; i++) {
+        const point = fieldToScreen(this.path[i], view);
+
+        if (i === from) {
+          context.moveTo(point.x, point.y);
+        } else {
+          context.lineTo(point.x, point.y);
+        }
+      }
+
+      context.stroke();
+    };
+
+    const thin = Math.max(1.5, view.scale * 0.22);
+    stroke(0, this.path.length - 1, "#5b2ea6", thin);
+
+    if (this.highlight === null) {
+      return;
+    }
+
+    const first = this.indexAt(this.highlight.from);
+    const last = this.indexAt(this.highlight.to);
+
+    if (last > first && this.spanCm(first, last) >= 1) {
+      stroke(first, last, "#ff6d00", thin * 2.2);
+      return;
+    }
+
+    // Nothing to light up along the ground: either a turn on the spot, which
+    // is most of the turns in a run, or a step the builder merged into the one
+    // before it. Mark where it happens instead, or selecting it shows nothing.
+    const point = fieldToScreen(this.path[first], view);
+    const radius = Math.max(4, thin * 2.5);
+
+    context.fillStyle = "#ff6d00";
+    context.beginPath();
+    context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+    context.fill();
+
+    context.strokeStyle = "#ffffff";
+    context.lineWidth = Math.max(1, thin * 0.5);
+    context.stroke();
+  }
+
+  /** How far the path gets from where the stretch started, in cm. */
+  private spanCm(from: number, to: number): number {
+    const start = this.path[from];
+    let far = 0;
+
+    for (let i = from; i <= to; i++) {
+      far = Math.max(
+        far,
+        Math.hypot(this.path[i].x - start.x, this.path[i].y - start.y),
+      );
+    }
+
+    return far;
+  }
+
+  /** The point on the path nearest a moment in the run. */
+  private indexAt(ms: number): number {
+    let best = 0;
+
+    for (let i = 0; i < this.path.length; i++) {
+      if (this.path[i].t <= ms) {
+        best = i;
+      } else {
+        break;
+      }
+    }
+
+    return best;
   }
 
   private drawRobot() {

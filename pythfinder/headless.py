@@ -132,6 +132,7 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
             "name": name,
             "ok": not any(problem.is_error() for problem in diagnostics),
             "total_ms": trajectory.TIME,
+            "steps": _step_times(builder, segment_owner, steps),
             "poses": _poses(trajectory, pose_every_ms),
             # already in the order they fire, which is the order the hub
             # expects the actions to be bound in
@@ -221,6 +222,41 @@ def _described_step(segment_index, segment_owner):
     return None
 
 
+def _step_times(builder, segment_owner: list, steps: list) -> list:
+    """When each described step runs, in trajectory time.
+
+    The page needs this to say which step is happening at a given moment, and
+    to light up one step's share of the path.
+
+    Merged steps are the awkward case. The builder combines consecutive drives
+    in one direction, and consecutive waits, into a single segment, so a step
+    that was merged into an earlier one has no time of its own: it reports the
+    moment that segment finishes as both its start and its end. Its motion is
+    real, but it lives inside the earlier step's acceleration profile and
+    cannot be separated out.
+    """
+    ends = {}
+
+    for segment, owner in enumerate(segment_owner):
+        if segment < len(builder.step_ends):
+            ends[owner] = builder.step_ends[segment]
+
+    timed = []
+    previous = 0
+
+    for index, step in enumerate(steps):
+        ends_at = ends.get(index, previous)
+
+        timed.append({"index": index,
+                      "type": step.get("type") if isinstance(step, dict) else None,
+                      "starts_ms": previous,
+                      "ends_ms": ends_at})
+
+        previous = ends_at
+
+    return timed
+
+
 def _hub_module(trajectory, name: str, steps_ms: int, diagnostics: list):
     if trajectory.TIME <= 0:
         return None
@@ -260,6 +296,7 @@ def _nothing_to_drive(name: str, diagnostics: list) -> dict:
             "name": name,
             "ok": False,
             "total_ms": 0,
+            "steps": [],
             "poses": [],
             "markers": [],
             "diagnostics": [problem.as_dict() for problem in diagnostics],

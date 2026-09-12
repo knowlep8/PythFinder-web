@@ -299,7 +299,10 @@ class TrajectoryBuilder():
     def build(self) -> Trajectory:
 
         self.diagnostics = []
-        self.__step_ends = []
+
+        # when each segment ends, in trajectory time. Public because the web
+        # planner needs it to say which step is running at a given moment
+        self.step_ends = []
 
         self.last_state = MotionState(pose = self.START_POSE)
         self.pose = self.START_POSE.copy()
@@ -328,7 +331,7 @@ class TrajectoryBuilder():
             # combine states from the primitive into one state
             self.states += sgm.get_all()
             self.TRAJ_TIME += sgm.total_time
-            self.__step_ends.append(self.TRAJ_TIME)
+            self.step_ends.append(self.TRAJ_TIME)
 
             self.last_state = sgm.states[-1]
 
@@ -412,7 +415,7 @@ class TrajectoryBuilder():
         timed at the running total, so the final moment of the run would
         otherwise belong to no step at all.
         """
-        for step, ends_at in enumerate(self.__step_ends):
+        for step, ends_at in enumerate(self.step_ends):
             if time_ms <= ends_at:
                 return step
 

@@ -85,6 +85,45 @@ def test_markers_come_back_in_the_order_they_fire():
     assert [marker["step"] for marker in result["markers"]] == [0, 1]
 
 
+def test_each_step_says_when_it_runs():
+    """What the page lights up one step's share of the path with."""
+    result = build_run(TEMPLATE_RUN)
+    steps = result["steps"]
+
+    assert [step["index"] for step in steps] == [0, 1, 2, 3, 4]
+    assert [step["type"] for step in steps] == ["drive", "wait", "turn",
+                                                "drive", "toPose"]
+
+    # they run back to back, from the beginning to the end of the run
+    assert steps[0]["starts_ms"] == 0
+    assert steps[-1]["ends_ms"] == result["total_ms"]
+
+    for earlier, later in zip(steps, steps[1:]):
+        assert earlier["ends_ms"] == later["starts_ms"]
+
+    # the action 35cm into the first step fires while that step is running
+    arm_down = result["markers"][0]
+    assert steps[0]["starts_ms"] <= arm_down["time_ms"] <= steps[0]["ends_ms"]
+
+
+def test_a_merged_step_has_no_time_of_its_own():
+    """Two drives in one direction are one move, and the times say so.
+
+    Not a fudge: the second 20cm has no separate acceleration profile to point
+    at, because the builder planned 40cm in one go.
+    """
+    run = dict(TEMPLATE_RUN)
+    run["steps"] = [{"type": "drive", "cm": 20},
+                    {"type": "drive", "cm": 20}]
+
+    steps = build_run(run)["steps"]
+    total = build_run(run)["total_ms"]
+
+    assert steps[0]["starts_ms"] == 0
+    assert steps[0]["ends_ms"] == total
+    assert steps[1]["starts_ms"] == steps[1]["ends_ms"] == total
+
+
 def test_poses_are_thinned_for_drawing_but_keep_the_ending():
     result = build_run(TEMPLATE_RUN, pose_every_ms = 20)
 

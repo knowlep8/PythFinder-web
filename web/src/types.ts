@@ -62,6 +62,14 @@ export interface BuiltMarker {
   time_ms: number;
 }
 
+/** When one described step runs. A merged step starts and ends together. */
+export interface BuiltStep {
+  index: number;
+  type: StepType | null;
+  starts_ms: number;
+  ends_ms: number;
+}
+
 export interface Diagnostic {
   level: "warning" | "error";
   message: string;
@@ -75,6 +83,7 @@ export interface BuildResult {
   name: string;
   ok: boolean;
   total_ms: number;
+  steps: BuiltStep[];
   poses: PathPose[];
   markers: BuiltMarker[];
   diagnostics: Diagnostic[];
