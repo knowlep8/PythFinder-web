@@ -1,13 +1,18 @@
 /**
- * Step 2.1: the scaffold, and proof that the container can do the job.
+ * Step 2.2: Python in a worker, and proof that it stays out of the way.
  *
- * Loads Pyodide from this same origin, unpacks the PythFinder wheel into its
- * filesystem, builds the run from fll_run_template.py, and checks the result
- * against the numbers in the file the hub is running today.
+ * Three things are checked, in the order they matter:
  *
- * The real interface arrives in 2.2 onwards; this page exists so the container
- * can be proved before anything is built on top of it.
+ *   1. the worker builds the run from fll_run_template.py, and gets the same
+ *      file the hub is running;
+ *   2. the page keeps drawing while it does -- measured, not asserted;
+ *   3. a burst of edits causes one build, of the newest run, not twenty.
+ *
+ * The real interface starts in 2.3. This page is the scaffolding's test.
  */
+
+import { createPlanner } from "./planner";
+import type { Run } from "./types";
 
 // what the hub is running today, from tests/golden/hub/template_run.py
 const EXPECTED = {
@@ -17,7 +22,7 @@ const EXPECTED = {
   total_ms: 15641,
 };
 
-const TEMPLATE_RUN = {
+const TEMPLATE_RUN: Run = {
   version: 1,
   name: "run_a",
   steps_ms: 6,
@@ -32,7 +37,6 @@ const TEMPLATE_RUN = {
   ],
 };
 
-// not called `screen`: that is already a global in the DOM
 const output = document.getElementById("log") as HTMLPreElement;
 
 function log(line: string) {
@@ -40,90 +44,154 @@ function log(line: string) {
   console.log("[planner] " + line);
 }
 
-function seconds(from: number) {
-  return ((performance.now() - from) / 1000).toFixed(1) + "s";
+/**
+ * Watch how long the page goes between frames.
+ *
+ * This is the whole point of the worker: on the main thread a build would
+ * stall painting for the better part of a second, and the longest gap would
+ * say so.
+ */
+function watchFrames() {
+  let last = performance.now();
+  let worst = 0;
+  let frames = 0;
+  let running = true;
+
+  function tick(now: number) {
+    frames += 1;
+    worst = Math.max(worst, now - last);
+    last = now;
+
+    if (running) {
+      requestAnimationFrame(tick);
+    }
+  }
+
+  requestAnimationFrame(tick);
+
+  return {
+    stop() {
+      running = false;
+
+      // The frame count matters as much as the gap. Chrome stops painting a
+      // tab that is not visible, so a hidden tab reports a worst gap of 0ms --
+      // which looks like a perfect score and means nothing at all.
+      return { worstGap: Math.round(worst), frames };
+    },
+  };
+}
+
+function lineFor(moduleText: string, prefix: string) {
+  return moduleText.split("\n").find((line) => line.startsWith(prefix)) ?? "";
+}
+
+/** The same run, driving a little further each time -- as if somebody typed. */
+function editedRun(cm: number): Run {
+  const steps = TEMPLATE_RUN.steps.map((step) => ({ ...step }));
+  steps[0] = { ...steps[0], cm };
+
+  return { ...TEMPLATE_RUN, steps };
 }
 
 async function main() {
   output.textContent = "";
 
-  // Loaded from our own origin, not a CDN. The path is held in a variable so
-  // the bundler leaves it alone: these files are copied in by
-  // scripts/copy-pyodide.mjs, not imported through node_modules.
-  const runtime = "/pyodide/pyodide.mjs";
+  let lastResult = 0;
 
-  let mark = performance.now();
-  const { loadPyodide } = await import(/* @vite-ignore */ runtime);
-  const pyodide = await loadPyodide({ indexURL: "/pyodide/" });
-  log(`pyodide started from ${location.origin}/pyodide/ in ${seconds(mark)}`);
+  const planner = createPlanner({
+    onStatus: (text) => log(text + "..."),
+    onResult: (result, seconds) => {
+      lastResult = result.total_ms;
+      log(`  background build: ${result.total_ms}ms run, took ${seconds}s`);
+    },
+    onError: (message) => log("planner error: " + message),
+  });
 
-  // A wheel is a zip, and this one has no dependencies, so there is nothing
-  // for a package installer to resolve: unpack it straight into the
-  // filesystem, which saves serving micropip as well.
-  mark = performance.now();
-  const wheel = await fetch("/pythfinder.whl");
+  const started = performance.now();
+  const { python, seconds } = await planner.ready;
+  log(`python ${python} ready in ${seconds}s`);
 
-  if (!wheel.ok) {
-    throw new Error(
-      `the library is not being served: /pythfinder.whl returned ${wheel.status}`,
+  // 1. the run, built in the worker
+  const frames = watchFrames();
+  const { result, seconds: built } = await planner.build(TEMPLATE_RUN);
+  const painting = frames.stop();
+
+  log("");
+  log(`built in ${built}s: ${result.total_ms}ms, ${result.poses.length} poses`);
+  log(`actions: ${result.markers.map((m) => `${m.id} at ${m.time_ms}ms`).join(", ")}`);
+  log(`problems: ${result.diagnostics.map((d) => d.message).join(" | ") || "none"}`);
+
+  const moduleText = result.module_text ?? "";
+  const got = {
+    steps_line: lineFor(moduleText, "STEPS"),
+    markers_line: lineFor(moduleText, "MARKERS"),
+    count_line: lineFor(moduleText, "COUNT"),
+    total_ms: result.total_ms,
+  };
+
+  log(`${got.steps_line}   ${got.markers_line}   ${got.count_line}`);
+  log("");
+
+  // 2. did the page keep drawing while that happened
+  const judged = painting.frames >= 5;
+  const stalled = judged && painting.worstGap >= 100;
+
+  if (judged) {
+    log(
+      `longest gap between frames while building: ${painting.worstGap}ms ` +
+        `over ${painting.frames} frames`,
     );
+    log(
+      stalled
+        ? "  THAT IS A STALL - something is running on the page's thread"
+        : "  the page kept drawing, so the worker is doing its job",
+    );
+  } else {
+    log(`the page painted ${painting.frames} frames while building: too few to judge`);
+    log("  a hidden tab is not painted at all, so open this one to measure it");
   }
 
-  const bytes = await wheel.arrayBuffer();
-  await pyodide.unpackArchive(bytes, "zip");
-  log(`library unpacked (${(bytes.byteLength / 1e6).toFixed(2)}MB) in ${seconds(mark)}`);
-
-  mark = performance.now();
-  pyodide.globals.set("run_json", JSON.stringify(TEMPLATE_RUN));
-
-  const answer = await pyodide.runPythonAsync(`
-import json, sys, time
-
-from pythfinder.headless import build_run
-
-started = time.time()
-result = build_run(json.loads(run_json))
-built_in = time.time() - started
-
-lines = result["module_text"].splitlines()
-def line_for(prefix):
-    return next(line for line in lines if line.startswith(prefix))
-
-json.dumps({
-    "python": sys.version.split()[0],
-    "ok": result["ok"],
-    "total_ms": result["total_ms"],
-    "poses": len(result["poses"]),
-    "markers": [m["id"] + " at " + str(m["time_ms"]) + "ms" for m in result["markers"]],
-    "diagnostics": [d["message"] for d in result["diagnostics"]],
-    "steps_line": line_for("STEPS"),
-    "markers_line": line_for("MARKERS"),
-    "count_line": line_for("COUNT"),
-    "build_seconds": round(built_in, 3),
-})
-`);
-
-  const data = JSON.parse(answer);
-  log(`run built in ${seconds(mark)}`);
   log("");
-  log(`python ${data.python}`);
-  log(`ok: ${data.ok}   total: ${data.total_ms}ms   poses: ${data.poses}`);
-  log(`actions: ${data.markers.join(", ")}`);
-  log(`problems: ${data.diagnostics.join(" | ") || "none"}`);
-  log(`${data.steps_line}   ${data.markers_line}   ${data.count_line}`);
+
+  // 3. a burst of edits should cost one build, of the last one
+  log("typing 20 edits as fast as possible...");
+  const before = planner.builds();
+
+  for (let cm = 60; cm < 80; cm++) {
+    planner.request(editedRun(cm));
+  }
+
+  await new Promise((wake) => setTimeout(wake, 2500));
+
+  const buildsRun = planner.builds() - before;
+  log(`  builds actually run: ${buildsRun}`);
+  log(`  last result is for the last edit: ${lastResult > 0}`);
   log("");
 
   const wrong = (Object.keys(EXPECTED) as (keyof typeof EXPECTED)[]).filter(
-    (key) => data[key] !== EXPECTED[key],
+    (key) => got[key] !== EXPECTED[key],
   );
 
-  if (wrong.length === 0) {
-    log("RESULT: PASS - this container produced the file the hub is running");
-    document.title = "PASS";
-  } else {
-    log("RESULT: FAIL - " + wrong.map((key) => `${key} was ${data[key]}`).join(", "));
+  if (wrong.length > 0) {
+    log("RESULT: FAIL - " + wrong.map((key) => `${key} was ${got[key]}`).join(", "));
     document.title = "FAIL";
+  } else if (stalled) {
+    log("RESULT: FAIL - the page stalled while building");
+    document.title = "FAIL";
+  } else if (buildsRun > 3) {
+    log(`RESULT: FAIL - ${buildsRun} builds for 20 edits, the debounce is not working`);
+    document.title = "FAIL";
+  } else {
+    log(
+      `RESULT: PASS - same file as the hub, ` +
+        `${judged ? "no stall" : "painting not measured"}, ` +
+        `${buildsRun} build(s) for 20 edits, ` +
+        `all in ${Math.round(performance.now() - started) / 1000}s`,
+    );
+    document.title = "PASS";
   }
+
+  planner.stop();
 }
 
 main().catch((error) => {
@@ -132,6 +200,4 @@ main().catch((error) => {
   console.error(error);
 });
 
-// this file is loaded as a module, and only a dynamic import appears above, so
-// say so explicitly for the type checker
 export {};
