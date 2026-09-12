@@ -6,9 +6,10 @@
   "description": "Plan an FLL run in a browser and download the file the hub runs",
   "scripts": {
     "copy:pyodide": "node scripts/copy-pyodide.mjs",
-    "predev": "npm run copy:pyodide",
+    "copy:assets": "node scripts/copy-assets.mjs",
+    "predev": "npm run copy:pyodide && npm run copy:assets",
     "dev": "vite",
-    "prebuild": "npm run copy:pyodide",
+    "prebuild": "npm run copy:pyodide && npm run copy:assets",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview"
   },

@@ -3,6 +3,8 @@ dist/
 
 # Build artefacts, fetched or built before dev and before build:
 #   public/pyodide/   copied out of node_modules by scripts/copy-pyodide.mjs
+#   public/field/     copied out of pythfinder/Images by scripts/copy-assets.mjs
 #   public/*.whl      built by tools/slim_wheel.py, or by the Dockerfile
 public/pyodide/
+public/field/
 public/*.whl

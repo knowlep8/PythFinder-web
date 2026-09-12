@@ -6,25 +6,67 @@
     <title>PythFinder planner</title>
     <style>
       :root { color-scheme: dark; }
+
       body {
         font: 14px ui-monospace, SFMono-Regular, Menlo, monospace;
         margin: 0;
-        padding: 24px;
+        padding: 20px;
         background: #101214;
         color: #e6e6e6;
       }
+
       h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
-      p.sub { margin: 0 0 20px; color: #8a8f98; }
-      pre { white-space: pre-wrap; line-height: 1.6; margin: 0; }
+      p.sub { margin: 0 0 16px; color: #8a8f98; }
+
+      #field {
+        display: block;
+        width: 100%;
+        max-width: 1100px;
+        aspect-ratio: 200.5 / 114.3;
+        background: #17191c;
+        border: 1px solid #2a2e34;
+        border-radius: 6px;
+        touch-action: none;
+        cursor: crosshair;
+      }
+      #field:focus-visible { outline: 2px solid #00e5ff; }
+
+      .readout {
+        display: flex;
+        gap: 24px;
+        flex-wrap: wrap;
+        max-width: 1100px;
+        margin: 10px 0 16px;
+        color: #b9bec6;
+      }
+      .readout b { color: #e6e6e6; font-weight: 600; }
+
+      pre {
+        white-space: pre-wrap;
+        line-height: 1.6;
+        margin: 0;
+        color: #b9bec6;
+        max-width: 1100px;
+      }
     </style>
   </head>
   <body>
     <h1>PythFinder planner</h1>
     <p class="sub">
-      Step 2.2 — Python runs in a worker: the run comes out the same, the page
-      keeps painting while it builds, and a burst of edits costs one build.
+      Step 2.3 — drag the robot to set where the run starts, and turn it with
+      the left and right arrow keys (hold shift for one degree at a time).
     </p>
+
+    <canvas id="field"></canvas>
+
+    <div class="readout">
+      <span>start: <b id="pose">—</b></span>
+      <span>mouse: <b id="mouse">—</b></span>
+      <span>run: <b id="run">—</b></span>
+    </div>
+
     <pre id="log">starting...</pre>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

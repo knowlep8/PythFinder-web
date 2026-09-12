@@ -54,9 +54,9 @@ STEPS = 6
 # field, with the heading in degrees. Read these off the bottom RIGHT corner of
 # the simulator window (bottom left is the mouse, and has no heading).
 #
-# +x is UP the screen and +y is to the RIGHT, so head = 0 faces up, 90 faces
-# right, and angles increase counter-clockwise. This pose is the left launch
-# area, facing up the field.
+# +x is UP the screen and +y is to the RIGHT, so head = 0 faces up and 90 faces
+# right: a turn from 0 to 90 looks CLOCKWISE on the screen, even though it goes
+# from +x toward +y. This pose is the left launch area, facing up the field.
 START_POSE = Pose(x = -46, y = -83, head = 0)
 
 FLL_FIELD = 1   # preset 1 is the FLL field, preset 2 is FTC

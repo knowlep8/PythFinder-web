@@ -43,6 +43,11 @@ RUN npm ci
 
 COPY web/ ./
 
+# The mat and the robot. They live with the library, and the wheel the browser
+# gets has them stripped out, so the page carries its own copies.
+COPY pythfinder/Images/Field/FLL_table_BG.png public/field/mat.png
+COPY pythfinder/Images/Robot/fll_robot_team.png public/field/robot.png
+
 # prebuild copies the Pyodide runtime out of node_modules into public/
 RUN npm run build
 

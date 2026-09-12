@@ -15,6 +15,7 @@ build
 web/node_modules
 web/dist
 web/public/pyodide
+web/public/field
 web/public/*.whl
 
 docs
