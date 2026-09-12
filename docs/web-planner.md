@@ -573,8 +573,32 @@ working hub file. No actions yet.
   run planned here, upload it at code.pybricks.com, and drive it. The file is
   byte-identical to the one the hub already runs (step 1.8), so this is a
   formality, but it is the only part that proves the whole chain on the robot.
-- [ ] **2.8 Save and load.** Autosave to browser storage; export/import the run
-  `.json`; a list of the team's runs.
+- [x] **2.8 Save and load.**
+  - `src/store.ts` does three separate jobs: autosaving the run in progress,
+    keeping a named list to pick between, and export/import as a `.json` file
+    for carrying to another laptop.
+  - Autosave happens on every change rather than on a button, because the
+    change somebody loses is always the one they did not think to save.
+  - Every read is defensive. Browser storage can be full, switched off, or
+    holding something an older version of this page wrote, and none of those is
+    a reason for a team member to lose their run: a file that is not a run is
+    refused by name rather than loaded as rubbish.
+  - *Verified in the container:* edits tracked into storage; Save listed the
+    run and re-opening it restored the saved values over newer edits; Delete
+    removed it; the export payload parsed back as a run, and `{"hello":1}`,
+    `[1,2,3]` and `null` were all refused. Then the real test — **reload the
+    page and the run comes back**: name, all five steps, the edited 137cm and
+    the start pose.
+
+  **A bug the first round-trip found:** autosave only ran inside `rebuild()`,
+  which edits call — so a run that was opened and *left alone* was never
+  written down. That is exactly the run somebody loses when they close the tab
+  on their way out. The page now saves what is on screen at start-up too.
+
+  **Seen in passing:** with the first step stretched to 137cm the run runs off
+  the top of the table, and the off-mat marking from 2.6 drew a long red
+  stretch with a 45.7cm warning on the step that caused it. Until then that
+  path had only been exercised against a 0.7cm pirouette.
   - *Optional, and the one real gain from self-hosting:* a small storage API in
     the container — `GET/PUT /runs/<name>.json` against a mounted folder — so a
     run planned on one laptop opens on another, instead of being passed around
