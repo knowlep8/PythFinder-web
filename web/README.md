@@ -32,6 +32,26 @@ ln -sfn /opt/homebrew/lib/docker/cli-plugins/docker-compose ~/.docker/cli-plugin
 Both need a running engine — Docker Desktop, colima, or the daemon on whichever
 host is serving this. A CLI on its own cannot build anything.
 
+A related trap on macOS: if the build stops with
+
+```
+error getting credentials - err: exec: "docker-credential-desktop":
+executable file not found in $PATH
+```
+
+then `~/.docker/config.json` asks for Docker Desktop's credential helper while
+the CLI in use is Homebrew's, which cannot see it. Desktop keeps its binaries
+outside the normal path, so add them to it:
+
+```fish
+fish_add_path /Applications/Docker.app/Contents/Resources/bin
+```
+
+That supplies the helper *and* the compose plugin, so `docker compose` starts
+working too. The alternative is to delete the `"credsStore": "desktop"` line
+from `~/.docker/config.json`: these images are all public, so nothing here
+needs a credential helper at all.
+
 ## Working on it
 
 Vite's dev server is much quicker to iterate with, but it needs the two build

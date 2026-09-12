@@ -1,6 +1,8 @@
-# syntax=docker/dockerfile:1
-
 # The planner: a static page that runs PythFinder in the browser.
+#
+# Deliberately no `# syntax=` line: it pulls a frontend image from Docker Hub
+# on every build, and nothing here needs one. The three base images are the
+# only things this has to fetch.
 #
 # Three stages, because the image needs two things built in different
 # languages and neither toolchain belongs in what finally runs:
