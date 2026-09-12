@@ -434,12 +434,28 @@ working hub file. No actions yet.
   Chrome does not paint a tab that is not on screen, so an automated run
   reports zero frames and the page says so rather than claiming a perfect
   score. Open `http://127.0.0.1:8080` by hand to see a real number.
-- [ ] **2.3 Field view.** Canvas with the BIOGLOW image at true scale and the
-  robot sprite. Coordinate helpers carry the +x-up / +y-right / CCW convention
-  over from `Components/robot.py:106-114`. Show the mouse position in field cm.
-  Drag the robot to set the start pose; rotate with a handle or the arrow keys.
-  - *Done when:* the start pose `(-46, -83, 0)` sits in the left launch area,
-    exactly where the desktop simulator puts it.
+- [x] **2.3 Field view.**
+  - `src/field.ts` holds the convention and nothing else: the mat's size, the
+    robot's, and the maps between field centimetres and canvas pixels, carried
+    over from `Components/robot.py:106-114`.
+  - `src/fieldView.ts` draws the mat and the robot, and lets the robot be
+    dragged and turned with the arrow keys (shift for one degree). Every change
+    asks the worker for a fresh run through the debounce from 2.2.
+  - The mat image is 2172x1238, an aspect of 1.7544 against the table's 1.7542,
+    so it can be drawn across the whole field rectangle without distorting.
+  - *Done:* the start pose `(-46, -83, 0)` lands inside the red launch arc at
+    the bottom left, nose up the field, exactly as the simulator draws it.
+    Dragging to a measured point on screen read back **x 4.6, y -3.8** against
+    4.5, -3.8 predicted from the mat's pixel extents; three taps of the right
+    arrow gave 15°; and the run readout followed each change.
+
+  **The heading convention is clockwise as drawn.** A turn from 0 (up the
+  field) toward 90 (to the right) looks clockwise on the screen, even though it
+  is a turn from +x toward +y. The canvas rotation is therefore `+head`, plus a
+  quarter turn because the robot photo has its nose at the left edge — the same
+  `head + 90` the simulator uses. `fll_run_template.py` described this as
+  "counter-clockwise", which is true of the axes and misleading about the
+  picture; its comment now says which way it looks.
 - [ ] **2.4 Step list.** Add, edit, reorder, delete. Step types, mapped 1:1 to
   builder calls:
   - Drive (cm, forward/back) → `inLineCM`
