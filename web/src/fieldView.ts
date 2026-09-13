@@ -27,10 +27,27 @@ export interface FieldViewHandlers {
   onPoseChange?: (pose: FieldPose) => void;
   /** where the mouse is, in field cm, or null once it leaves */
   onHover?: (point: FieldPoint | null) => void;
+  /** step 4.1: a Go-to step's own target was dragged to a new field point */
+  onWaypointChange?: (index: number, point: FieldPoint) => void;
+}
+
+/** A draggable target, step 4.1: one per toPoint/toPose step in the run. */
+export interface Waypoint {
+  /** which described step this is, so a drag can be written back to it */
+  index: number;
+  point: FieldPoint;
+  /** true when the step list has this one selected -- drawn to match */
+  selected: boolean;
 }
 
 const TURN_STEP_DEG = 5;
 const FINE_TURN_STEP_DEG = 1;
+
+/** How close a click has to land, in field cm, to grab a waypoint rather
+ *  than pass through to whatever is under it. Generous: these are the
+ *  smallest thing on the mat to aim for, and a finger is not a mouse. */
+const WAYPOINT_HIT_CM = 6;
+const WAYPOINT_RADIUS_CM = 2.2;
 
 export class FieldView {
   private canvas: HTMLCanvasElement;
@@ -46,6 +63,10 @@ export class FieldView {
   private highlight: { from: number; to: number } | null = null;
   private playhead: FieldPose | null = null;
   private offMat: Array<[number, number]> = [];
+
+  // step 4.1
+  private waypoints: Waypoint[] = [];
+  private draggingWaypoint: number | null = null;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -99,6 +120,20 @@ export class FieldView {
     this.draw();
   }
 
+  /**
+   * The Go-to steps' own targets, step 4.1. Fed from the step list, not
+   * computed here -- the field draws them, the app owns what they mean.
+   *
+   * The app is expected to call this straight back from onWaypointChange
+   * (through the step list, so both stay the single source of truth), which
+   * happens synchronously within the same pointer event -- there is no async
+   * gap here for a dragged point to go stale in.
+   */
+  setWaypoints(waypoints: Waypoint[]) {
+    this.waypoints = waypoints;
+    this.draw();
+  }
+
   /** Match the canvas to the space it has been given, and to the screen's dots. */
   resize() {
     const box = this.canvas.getBoundingClientRect();
@@ -132,9 +167,16 @@ export class FieldView {
     this.drawPath();
     this.drawRobot();
 
-    // After the robot, deliberately. The commonest way to hang off the mat is
-    // to turn on the spot at the edge, which puts the mark exactly where the
-    // robot is standing -- drawn first, it is painted over and invisible.
+    // After the robot, deliberately -- twice already logged in this project
+    // as the mistake of drawing a marker before the thing that can cover it.
+    // A Go-to step's own target commonly lands right where the robot starts
+    // or ends (toPose back to the launch pose is the commonest last step), so
+    // drawn first a waypoint would be invisible, and worse, unclickable,
+    // exactly there.
+    this.drawWaypoints();
+
+    // The commonest way to hang off the mat is to turn on the spot at the
+    // edge, which puts the mark exactly where the robot is standing.
     this.strokeOffMat(Math.max(1.5, this.view.scale * 0.22));
   }
 
@@ -378,6 +420,51 @@ export class FieldView {
     context.stroke();
   }
 
+  /** Step 4.1: one draggable handle per Go-to step, numbered to match the
+   *  row it belongs to -- the same number the step list shows on the left. */
+  private drawWaypoints() {
+    const { context, view } = this;
+    const radius = Math.max(4, WAYPOINT_RADIUS_CM * view.scale);
+
+    for (const waypoint of this.waypoints) {
+      const at = fieldToScreen(waypoint.point, view);
+      const colour = waypoint.selected ? "#ff6d00" : "#00e5ff";
+
+      context.fillStyle = colour;
+      context.beginPath();
+      context.arc(at.x, at.y, radius, 0, Math.PI * 2);
+      context.fill();
+
+      context.strokeStyle = "#101214";
+      context.lineWidth = Math.max(1, view.scale * 0.12);
+      context.stroke();
+
+      context.fillStyle = "#101214";
+      context.font = `${Math.max(9, radius * 1.1)}px ui-monospace, monospace`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(String(waypoint.index + 1), at.x, at.y + 0.5);
+    }
+  }
+
+  /** The nearest waypoint within grabbing distance of a click, or null. */
+  private waypointAt(point: FieldPoint): number | null {
+    let best: { index: number; distance: number } | null = null;
+
+    for (const waypoint of this.waypoints) {
+      const distance = Math.hypot(
+        point.x - waypoint.point.x,
+        point.y - waypoint.point.y,
+      );
+
+      if (distance <= WAYPOINT_HIT_CM && (best === null || distance < best.distance)) {
+        best = { index: waypoint.index, distance };
+      }
+    }
+
+    return best === null ? null : best.index;
+  }
+
   private pointerField(event: PointerEvent): FieldPoint {
     const box = this.canvas.getBoundingClientRect();
     const dots = window.devicePixelRatio || 1;
@@ -394,6 +481,21 @@ export class FieldView {
   private onPointerDown = (event: PointerEvent) => {
     const point = this.pointerField(event);
 
+    // Waypoints first: they are small, precise targets, and one landing
+    // inside the robot's own footprint -- a toPose step back to the launch
+    // pose is the commonest last step in a run -- must still be reachable.
+    // Missing a waypoint by a few cm still finds the much bigger robot
+    // underneath it, so checking robot-first would make that common case
+    // unreachable rather than merely making the rare overlap ambiguous.
+    const waypoint = this.waypointAt(point);
+
+    if (waypoint !== null) {
+      this.draggingWaypoint = waypoint;
+      this.canvas.setPointerCapture(event.pointerId);
+      this.canvas.focus();
+      return;
+    }
+
     if (!insideRobot(point, this.pose)) {
       return;
     }
@@ -406,6 +508,22 @@ export class FieldView {
   private onPointerMove = (event: PointerEvent) => {
     const point = this.pointerField(event);
     this.handlers.onHover?.(point);
+
+    if (this.draggingWaypoint !== null) {
+      const { x, y } = clampToField(point);
+      const moved = { x: round(x), y: round(y) };
+
+      // held locally too, not just handed to the app, so the marker tracks
+      // the pointer even if whatever is listening does not echo it straight
+      // back -- the same reason onPoseChange below does not wait either
+      this.waypoints = this.waypoints.map((w) =>
+        w.index === this.draggingWaypoint ? { ...w, point: moved } : w,
+      );
+      this.draw();
+
+      this.handlers.onWaypointChange?.(this.draggingWaypoint, moved);
+      return;
+    }
 
     if (!this.dragging) {
       return;
@@ -423,6 +541,11 @@ export class FieldView {
   private onPointerUp = (event: PointerEvent) => {
     if (this.dragging) {
       this.dragging = false;
+      this.canvas.releasePointerCapture(event.pointerId);
+    }
+
+    if (this.draggingWaypoint !== null) {
+      this.draggingWaypoint = null;
       this.canvas.releasePointerCapture(event.pointerId);
     }
   };

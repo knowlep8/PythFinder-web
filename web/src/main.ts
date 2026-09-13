@@ -8,6 +8,7 @@
  */
 
 import { FieldView } from "./fieldView";
+import type { Waypoint } from "./fieldView";
 import { Playback } from "./playback";
 import { RunEditor } from "./runEditor";
 import { createPlanner } from "./planner";
@@ -167,11 +168,19 @@ async function main() {
       mouseReadout.textContent =
         point === null ? "—" : `x ${point.x.toFixed(1)}  y ${point.y.toFixed(1)}`;
     },
+    // step 4.1: dragging a Go-to step's own target on the field
+    onWaypointChange: (index, point) => {
+      editor.setStepPoint(index, point.x, point.y);
+      rebuild();
+    },
   });
 
   const editor = new RunEditor(stepList, startingSteps, {
     onChange: () => rebuild(),
-    onSelect: () => applyHighlight(),
+    onSelect: () => {
+      applyHighlight();
+      applyWaypoints();
+    },
   });
 
   const playback = new Playback({
@@ -250,6 +259,11 @@ async function main() {
     // member loses is always the one they did not think to save
     rememberWorking(run);
     planner.request(run);
+
+    // every step change reaches here -- typing an x into the step list same
+    // as dragging its marker -- so this is the one place waypoints refresh
+    // from, rather than a call at each place that can change one
+    applyWaypoints();
   }
 
   /** Put a run on screen: its steps, where it starts, and its name. */
@@ -285,6 +299,31 @@ async function main() {
 
     savedList.value = saved.some((entry) => entry.name === chosen) ? chosen : "";
     forgetButton.disabled = savedList.value === "";
+  }
+
+  /**
+   * Step 4.1: one draggable marker per Go-to step, read straight from the
+   * step list rather than from a build result -- a build is an async
+   * round-trip to the worker, and a dragged point has to track the pointer
+   * with nothing in between.
+   */
+  function applyWaypoints() {
+    const selected = editor.getSelected();
+
+    const waypoints: Waypoint[] = editor
+      .getSteps()
+      .map((step, index) => ({ step, index }))
+      .filter(
+        (entry): entry is { step: RunStep & { type: "toPoint" | "toPose" }; index: number } =>
+          entry.step.type === "toPoint" || entry.step.type === "toPose",
+      )
+      .map(({ step, index }) => ({
+        index,
+        point: { x: step.x ?? 0, y: step.y ?? 0 },
+        selected: index === selected,
+      }));
+
+    view.setWaypoints(waypoints);
   }
 
   function applyHighlight() {
@@ -490,6 +529,7 @@ async function main() {
   showPose();
   showSaveState();
   refreshSavedList();
+  applyWaypoints();
 
   // Save what is on screen straight away. Autosaving only on edit meant a run
   // that was opened and left alone was never written down, which is exactly

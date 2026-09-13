@@ -1220,7 +1220,51 @@ working, correctly ordered marker functions.
 
 Order these after watching the kids use phase 3.
 
-- [ ] **4.1** Drag waypoints on the field to edit Go-to steps directly.
+- [x] **4.1** Drag waypoints on the field to edit Go-to steps directly.
+  *Started ahead of the plan's own "order these after watching the kids use
+  phase 3" note — nobody has, yet.* One draggable handle per `toPoint`/
+  `toPose` step, numbered to match its row, extending the drag machinery 2.3
+  already built for the start pose rather than inventing a second kind.
+
+  **Waypoints first, robot second, at pointer-down.** A `toPose` step that
+  returns to the launch pose — the commonest last step in a run — puts its
+  own target right where the robot starts. Checked the other way round, that
+  common case would be unreachable: the robot's footprint is far bigger than
+  a waypoint's grab radius, so missing a waypoint by a few cm still finds the
+  robot underneath it, but a waypoint sitting on the robot would never be
+  reachable if the robot claimed the click first.
+
+  **Drawn after the robot, for the same reason.** This project has now logged
+  the mistake of drawing a marker before the thing that can cover it twice —
+  the off-mat marks in 2.6, and the merged-drive comment in 3.2's fix. A
+  waypoint under an opaque robot sprite would be both invisible and
+  unclickable exactly where it is most likely to sit.
+
+  **One source of truth, not two.** A dragged waypoint moves through
+  `RunEditor.setStepPoint`, the same object typing an x into the step list's
+  own box already mutates — dragging does not maintain a parallel copy of
+  the run that could drift from what typing produces. `FieldView` still
+  holds a short-lived local echo of the point *being* dragged, matching
+  `onPoseChange`'s own pattern, but only because the field cannot wait a
+  pointer-move on an async round-trip to redraw smoothly; `applyWaypoints()`
+  in `main.ts` is the one place waypoints are ever recomputed from the run,
+  called from `rebuild()` itself so a typed edit and a dragged one refresh
+  the same way, rather than from every place that happens to change one.
+
+  I drafted a version of `setWaypoints` that merged an in-flight drag against
+  incoming data to avoid a snap-back — solving a problem that, traced through
+  the actual call chain, cannot happen: `applyWaypoints()` runs synchronously
+  inside `rebuild()`, which runs synchronously inside the same pointer-move
+  handler that started it, so nothing arrives stale. Removed before it shipped,
+  once tracing the sequence made that clear — the kind of correctness a
+  comment can assert but only reading the actual order of calls can prove.
+
+  Checked by dragging a real waypoint with the mouse: the step list's x/y
+  updated to match the field's own readout exactly (`20.5, 44.4` both
+  places), the path re-routed and re-timed through a real rebuild, and the
+  marker read orange only once its row was actually selected. Checked the
+  other direction too: typing a coordinate into the step list moved the
+  marker on the field, not only the other way round.
 - [ ] **4.2** Robot settings panel (track width, max velocity, centre offset,
   speed limits, sprite), behind a simple mentor toggle.
 - [ ] **4.3** Launch-area presets and snapping for the start pose.

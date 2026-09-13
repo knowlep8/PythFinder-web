@@ -237,6 +237,45 @@ export class RunEditor {
     this.showProblems();
   }
 
+  /**
+   * Move a Go-to step's own target, step 4.1 -- what dragging its waypoint
+   * on the field does. Silently does nothing for a step that is not one:
+   * the field only ever calls this with an index it read from a waypoint
+   * list this same class handed it, but a step can change kind between that
+   * list being built and a drag landing, e.g. by deleting steps mid-drag.
+   *
+   * Called continuously while the pointer moves, so it follows the same
+   * rule as typing in a number: it must not call render(), or the row loses
+   * whatever the pointer is doing to it every time this fires.
+   */
+  setStepPoint(index: number, x: number, y: number) {
+    const step = this.steps[index];
+
+    if (!step || (step.type !== "toPoint" && step.type !== "toPose")) {
+      return;
+    }
+
+    step.x = x;
+    step.y = y;
+
+    const row = this.container.querySelector<HTMLElement>(
+      `.step[data-index="${index}"]`,
+    );
+
+    const xBox = row?.querySelector<HTMLInputElement>('input[data-key="x"]');
+    const yBox = row?.querySelector<HTMLInputElement>('input[data-key="y"]');
+
+    if (xBox) {
+      xBox.value = String(x);
+    }
+
+    if (yBox) {
+      yBox.value = String(y);
+    }
+
+    this.changed();
+  }
+
   private changed() {
     this.handlers.onChange?.(this.getSteps());
   }
@@ -415,6 +454,9 @@ export class RunEditor {
       box.step = String(field.step ?? 1);
       box.value = String(step[field.key] ?? 0);
       box.title = field.label;
+      // so setStepPoint (step 4.1: dragging a waypoint on the field) can find
+      // the right box from outside without guessing at DOM order
+      box.dataset.key = field.key;
 
       // typing changes the run but must not redraw this list
       box.addEventListener("input", () => {
