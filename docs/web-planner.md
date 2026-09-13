@@ -747,6 +747,11 @@ working, correctly ordered marker functions.
     carries a real 4.3 second run: forward 25cm dropping the arm 8cm in, half a
     second still, then back to the start raising the arm at the end.
 
+  The ports in `config.py` were already correct when that run sat silent, so
+  the silence really was those two faults and not the wiring. (The port layout
+  was remapped separately — wheels to E/A, task motors to B/F, sensors to C/D —
+  read off the build.)
+
   **The pattern worth remembering:** every one of these was invisible here and
   obvious in seconds on the robot. Firmware that renames the standard library
   cannot be stubbed for — a stub reproduces what a module *does*, never what the
