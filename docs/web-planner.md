@@ -1019,9 +1019,14 @@ working, correctly ordered marker functions.
   planner only ever creates `cm` actions, so it is unreachable today — the test
   is there for whoever adds a time field to the action row.
 
-  **Arm steps back to back were already right**, which the team will lean on:
+  **Arm steps back to back were mostly right**, which the team will lean on:
   arm down then arm up gives `MARKERS = (1702, 1882)`, two distinct
-  `run_angle(..., wait=True)` calls bound in order. Worth knowing why the
+  `run_angle(..., wait=True)` calls bound in order — `into_wait` was already
+  doing that job. What it did *not* cover was an **explicit** action on the
+  same arm step: that went straight to the builder unoffset and fired at
+  1711ms, inside the previous arm step. Only the implicit marker was ever
+  corrected. Both go through `_at_within_step` now, and the same was true of
+  two plain `wait` steps in a row. Worth knowing why the
   timeline still looks odd there: `_step_times` hands each merged arm step a
   notional slice, so the second reports `(2060, 2240)` while its marker fires
   at 1882 inside the shared wait segment. The markers are right; only the
@@ -1048,25 +1053,31 @@ working, correctly ordered marker functions.
 
   **The hub test that is still owed.** No planner-made marker has ever fired
   on the robot — the run driven in 3.1 had `MARKERS = ()`. `run_actions.py` in
-  the repository root is generated for exactly that: 4.3 seconds, 725 states,
-  `MARKERS = (1, 2086)`, one action of each kind.
+  the repository root is generated for exactly that: 4.5 seconds, 755 states,
+  `MARKERS = (1, 2086, 2266)`, one parallel action and a **back-to-back pair**
+  of arm steps, which is the operation the team will reach for most.
 
-      _action_1  core.leftTask.run(500)                       at 1ms
-      _action_2  core.leftTask.run_angle(500, 90, wait=True)  at 2086ms
+      _action_1  core.leftTask.run(500)                        at 1ms
+      _action_2  core.leftTask.run_angle(500,  90, wait=True)  at 2086ms
+      _action_3  core.leftTask.run_angle(500, -90, wait=True)  at 2266ms
 
-  Drive forward 30cm, arm down as it sets off; the arm then lifts 90° with the
-  robot stationary; then back 30cm. Add it to `runs.py` and call
-  `run_actions.run(core)`.
+  Drive forward 30cm with the arm starting as it sets off; the arm then goes
+  down 90° and back up 90° with the robot stationary; then back 30cm. Add it
+  to `runs.py` and call `run_actions.run(core)`.
 
-  Three things only the robot can answer, and each has a visible tell:
+  Four things only the robot can answer, and each has a visible tell:
 
   - the parallel action fires **at the very start** — the arm should move as
     the robot sets off, not after. This is the `cm: 0` case that was silently
     dropped until the boundary fix, and it has never run on hardware;
-  - the sequential action **blocks the follow loop** and the clock discounts
-    it, so the return leg should still be 30cm. If the compensation is wrong
-    the robot comes back short or long — measure where it stops;
-  - both fire **in order**, once each.
+  - the two arm steps happen **one after the other**, 180ms apart, not
+    together. They share a wait segment, so this is the case `into_wait` and
+    `_at_within_step` exist for;
+  - the sequential actions **block the follow loop** and the clock discounts
+    them, so the return leg should still be 30cm. If the compensation is wrong
+    the robot comes back short or long — measure where it stops. Two blocking
+    markers in a row is a harder test of that than one;
+  - all three fire **in order**, once each.
 
 - [ ] **3.3 Custom code action.** A CodeMirror 6 editor for a free-form action
   body, with `core` in scope. Check syntax in the worker with `compile()`; we
