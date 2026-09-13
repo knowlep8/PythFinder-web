@@ -24,12 +24,46 @@ export interface RunEditorHandlers {
 }
 
 interface FieldSpec {
-  key: "cm" | "ms" | "deg" | "x" | "y" | "head";
+  key: "cm" | "ms" | "deg" | "x" | "y" | "head" | "speed" | "angle";
   label: string;
   step?: number;
 }
 
-const SHAPES: Record<StepType, { title: string; fields: FieldSpec[]; reversible: boolean }> = {
+/** A picker: which motor, or which way to move it. */
+interface ChoiceSpec {
+  key: "motor" | "call";
+  options: Array<[string, string]>;
+}
+
+/** Attachment motors, as named on the hub. */
+const MOTORS: Array<[string, string]> = [
+  ["leftTask", "left arm"],
+  ["rightTask", "right arm"],
+];
+
+/**
+ * The calls each kind of action may use, and why they differ.
+ *
+ * A sequential arm step waits for the motor, so it needs a call that ends.
+ * A parallel action fires while the robot is driving, on the same loop that
+ * drives it, so it must return at once -- anything that waits would stall the
+ * path. That is the whole reason there are two kinds.
+ */
+const FINISHING_CALLS: Array<[string, string]> = [
+  ["run_angle", "turn by"],
+  ["run_target", "turn to"],
+  ["run_until_stalled", "until it stops"],
+];
+
+const INSTANT_CALLS: Array<[string, string]> = [
+  ["run", "start turning"],
+  ["stop", "stop"],
+];
+
+const SHAPES: Record<
+  StepType,
+  { title: string; fields: FieldSpec[]; choices?: ChoiceSpec[]; reversible: boolean }
+> = {
   drive: {
     title: "Drive",
     fields: [{ key: "cm", label: "cm" }],
@@ -62,6 +96,18 @@ const SHAPES: Record<StepType, { title: string; fields: FieldSpec[]; reversible:
     ],
     reversible: true,
   },
+  armStep: {
+    title: "Move arm",
+    choices: [
+      { key: "motor", options: MOTORS },
+      { key: "call", options: FINISHING_CALLS },
+    ],
+    fields: [
+      { key: "angle", label: "°", step: 5 },
+      { key: "speed", label: "°/s", step: 50 },
+    ],
+    reversible: false,
+  },
 };
 
 const NEW_STEP: Record<StepType, () => RunStep> = {
@@ -70,7 +116,29 @@ const NEW_STEP: Record<StepType, () => RunStep> = {
   wait: () => ({ type: "wait", ms: 500 }),
   toPoint: () => ({ type: "toPoint", x: 0, y: 0 }),
   toPose: () => ({ type: "toPose", x: 0, y: 0, head: 0 }),
+  armStep: () => ({
+    type: "armStep",
+    motor: "leftTask",
+    call: "run_angle",
+    angle: 90,
+    speed: 500,
+    actions: [{ id: newActionId(), label: "Move arm" }],
+  }),
 };
+
+/** Actions are bound by id in the generated file, so every one needs its own. */
+let actionCounter = 0;
+
+function newActionId(): string {
+  actionCounter += 1;
+
+  return `a${Date.now().toString(36)}${actionCounter}`;
+}
+
+/** Steps a parallel action can ride along with: the ones that move. */
+function canCarryActions(type: StepType): boolean {
+  return type !== "armStep" && type !== "wait";
+}
 
 export class RunEditor {
   private container: HTMLElement;
@@ -185,13 +253,22 @@ export class RunEditor {
       }
 
       const took = timing.ends_ms - timing.starts_ms;
+      const step = this.steps[index];
 
-      label.textContent =
-        took > 0
-          ? `${(took / 1000).toFixed(1)}s`
-          : index > 0
-            ? "joined to the step above"
-            : "";
+      if (took <= 0) {
+        // a drive merged into the one above it: there is no separate profile
+        label.textContent = index > 0 ? "joined to the step above" : "";
+        label.classList.remove("estimate");
+        continue;
+      }
+
+      // An arm step's length is worked out from the motor's speed and angle,
+      // not measured. The robot waits for the motor itself, so the real time
+      // may differ -- saying so is better than a confident wrong number.
+      const guessed = step?.type === "armStep";
+
+      label.textContent = `${guessed ? "about " : ""}${(took / 1000).toFixed(1)}s`;
+      label.classList.toggle("estimate", guessed);
     }
   }
 
@@ -246,7 +323,10 @@ export class RunEditor {
     const shape = SHAPES[step.type];
 
     const row = document.createElement("div");
-    row.className = "step" + (index === this.selected ? " selected" : "");
+    row.className =
+      "step" +
+      (index === this.selected ? " selected" : "") +
+      (step.type === "armStep" ? " arm" : "");
     row.dataset.index = String(index);
     row.addEventListener("pointerdown", () => this.select(index));
 
@@ -259,6 +339,25 @@ export class RunEditor {
     title.className = "title";
     title.textContent = shape.title;
     row.append(title);
+
+    for (const choice of shape.choices ?? []) {
+      const chosen = String(step[choice.key] ?? choice.options[0][0]);
+
+      row.append(
+        this.picker(choice.options, chosen, (picked) => {
+          // Narrowed on the key rather than cast away: the two pickers hold
+          // different sets of values, and this is what stops a motor name
+          // being written into the call.
+          if (choice.key === "motor") {
+            this.steps[index].motor = picked as RunStep["motor"];
+          } else {
+            this.steps[index].call = picked as RunStep["call"];
+          }
+
+          this.changed();
+        }),
+      );
+    }
 
     for (const field of shape.fields) {
       const box = document.createElement("input");
@@ -309,7 +408,168 @@ export class RunEditor {
       this.button("✕", "delete this step", () => this.remove(index)),
     );
 
+    // Parallel actions hang under the move they ride along with. An arm step
+    // is its own action, so it does not get any: offering one would be asking
+    // the arm to move while the arm is moving.
+    if (canCarryActions(step.type)) {
+      (step.actions ?? []).forEach((_, which) => {
+        row.append(this.renderAction(index, which));
+      });
+
+      const add = document.createElement("div");
+      add.className = "addaction";
+      add.append(
+        this.button("+ action while driving", "do something during this move", () =>
+          this.addAction(index),
+        ),
+      );
+      row.append(add);
+    }
+
     return row;
+  }
+
+  /** One thing that happens while this step is running. */
+  private renderAction(index: number, which: number): HTMLElement {
+    const action = (this.steps[index].actions ?? [])[which];
+    const command = action.do ?? { motor: "leftTask", call: "run", speed: 500 };
+
+    const line = document.createElement("div");
+    line.className = "action";
+
+    line.append(document.createTextNode("↳"));
+
+    line.append(
+      this.picker(MOTORS, command.motor, (picked) => {
+        this.setCommand(index, which, { motor: picked as "leftTask" | "rightTask" });
+      }),
+      this.picker(INSTANT_CALLS, command.call, (picked) => {
+        this.setCommand(index, which, { call: picked as "run" | "stop" });
+      }),
+    );
+
+    if (command.call !== "stop") {
+      line.append(
+        this.number(String(command.speed ?? 500), "°/s", 50, (value) => {
+          this.setCommand(index, which, { speed: value });
+        }),
+      );
+    }
+
+    // when it happens, as a distance into the move
+    line.append(document.createTextNode("at"));
+    line.append(
+      this.number(String(action.at?.cm ?? 0), "cm in", 1, (value) => {
+        const actions = this.steps[index].actions;
+
+        if (actions) {
+          actions[which] = { ...actions[which], at: { cm: value } };
+          this.changed();
+        }
+      }),
+    );
+
+    line.append(
+      this.button("✕", "remove this action", () => this.removeAction(index, which)),
+    );
+
+    return line;
+  }
+
+  private setCommand(index: number, which: number, change: Record<string, unknown>) {
+    const actions = this.steps[index].actions;
+
+    if (!actions) {
+      return;
+    }
+
+    const existing = actions[which].do ?? {
+      motor: "leftTask" as const,
+      call: "run" as const,
+      speed: 500,
+    };
+
+    actions[which] = { ...actions[which], do: { ...existing, ...change } as typeof existing };
+
+    // the speed box appears and disappears with the call, which is structural
+    if ("call" in change) {
+      this.render();
+    }
+
+    this.changed();
+  }
+
+  private addAction(index: number) {
+    const step = this.steps[index];
+
+    step.actions = [
+      ...(step.actions ?? []),
+      {
+        id: newActionId(),
+        at: { cm: 0 },
+        label: "Action",
+        do: { motor: "leftTask", call: "run", speed: 500 },
+      },
+    ];
+
+    this.render();
+    this.changed();
+  }
+
+  private removeAction(index: number, which: number) {
+    const step = this.steps[index];
+    step.actions = (step.actions ?? []).filter((_, at) => at !== which);
+
+    this.render();
+    this.changed();
+  }
+
+  private picker(
+    options: Array<[string, string]>,
+    chosen: string,
+    onPick: (value: string) => void,
+  ): HTMLElement {
+    const select = document.createElement("select");
+
+    for (const [value, label] of options) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      select.append(option);
+    }
+
+    select.value = chosen;
+    select.addEventListener("change", () => onPick(select.value));
+
+    return select;
+  }
+
+  private number(
+    value: string,
+    label: string,
+    step: number,
+    onType: (value: number) => void,
+  ): HTMLElement {
+    const box = document.createElement("input");
+
+    box.type = "number";
+    box.step = String(step);
+    box.value = value;
+    box.title = label;
+
+    // typing changes the run but must not redraw this list
+    box.addEventListener("input", () => {
+      const typed = Number(box.value);
+
+      if (Number.isFinite(typed)) {
+        onType(typed);
+      }
+    });
+
+    const wrapper = document.createElement("label");
+    wrapper.append(box, document.createTextNode(label));
+
+    return wrapper;
   }
 
   private renderAdders(): HTMLElement {

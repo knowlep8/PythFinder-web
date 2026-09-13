@@ -845,6 +845,168 @@ working, correctly ordered marker functions.
   Pick the motor from `leftTask` / `rightTask`, labelled with team-chosen names
   ("Left arm"). Each action appears as a marker dot on the path and fires
   visibly during playback.
+
+  **The browser half was being judged by a two-day-old library.** Both blocks
+  render — a "Move arm" adder, and "+ action while driving" on motion steps but
+  correctly not on a wait — yet the arm step came back marked with a problem:
+
+      'armStep' is not something the robot knows how to do
+      — try: use one of: drive, wait, turn, toPoint, toPose
+
+  That list is `STEP_TYPES` *without* `armStep`: the page was running the
+  library from before the feature existed. The container was innocent — it
+  serves 113,519 bytes with `armStep` present, read out of the wheel rather
+  than inferred — while the browser held 111,014 bytes from the day before.
+
+  **The service worker had pinned it, and no reload could shift it.** The wheel
+  sat in `planner-heavy`, which is cache-first and which no `VERSION` bump ever
+  clears, because that cache was designed for things that do not change between
+  releases: Pyodide, the mat, the robot. The wheel looked like one of them —
+  fetched once at start-up, small next to 13MB — but it *is* PythFinder, so it
+  changes whenever the Python half does. Worse, `fetch(url, {cache: "reload"})`
+  returned the stale copy too: `cache: "reload"` governs the browser's HTTP
+  cache, and a worker answers before the network is consulted at all. Short of
+  clearing site data by hand, that browser could never have received a fix.
+
+  Fixed by moving the wheel to the shell: replaced on every deploy, still
+  cached for a gym with no host (110KB, against the 13MB that stays put). The
+  fetch handler picks a cache by *name*, so the old entry would have gone on
+  answering even under the new policy — `activate` deletes it, which is what
+  actually frees a browser already holding one.
+
+  **`activate` also re-fetches the wheel, for a gap the move did not close.**
+  The shell is only discarded when `VERSION` changes, and `VERSION` lives in
+  `sw.js` — so a deploy that changes *only* the Python half ships a new wheel
+  while the worker stays byte-identical, `update()` finds nothing to install,
+  and the browser keeps the library it had. Unlike everything else recorded
+  here, that one is reasoned rather than witnessed: I thought I had caught it
+  happening, and the reading turned out to be a probe racing a reload. The
+  guard is kept because the argument holds on its own; the claim to have seen
+  it is withdrawn.
+
+  **The same shape as the `struct` failure, one level out.** There the harness
+  had a module the hub lacked; here the tests had a library the browser lacked.
+  Both times everything local passed while the only environment that matters
+  ran something else, and both times the answer was to read what that
+  environment actually had rather than trust that a build implies a delivery.
+
+  **Then the fresh library dropped every action the button makes.** With the
+  real wheel in place, a parallel action added by clicking "+ action while
+  driving" was still discarded:
+
+      an action 0.0cm into this step was dropped, because the step only
+      goes as far as 75.0cm
+
+  Not staleness this time. `addAction()` defaults to `at: { cm: 0 }` — the
+  moment the step begins, the only default that is sensible whatever the step's
+  length — and markers are placed by an **open** interval test, so one landing
+  exactly on a segment's first or last state counts as outside it. Reproduced
+  away from the browser: `0.5`, `1`, `20` and `74` cm all survive a 75cm step;
+  `0` and `75` are dropped. The same open test rejects `ms: 0`, and `-40cm` on
+  a 40cm step (counting back to the start).
+
+  It is worse than a warning, because the file still downloads: the generated
+  module carries `MARKERS = ()`, so the action reaches the robot as nothing at
+  all. A team member sees an arm that does not move, with a working-looking
+  file in their hand.
+
+  **Two gates, not one** — a fix to either alone leaves half the cases broken:
+
+  - `trajectoryBuilder.py:506`, on displacement, which `cm: 0` fails;
+  - `generic.py:173`, on time, which `ms: 0` fails without ever reaching the
+    first.
+
+  The shared helper `in_open_interval` is the wrong place to fix it: its other
+  callers are menu code (`presets.py`, `buttons.py`) with no stake in markers.
+  The three callers of `time_in_segment_segm_time` are all marker placement,
+  and `time_in_segment_traj_time` has none, so the blast radius is this
+  feature.
+
+  **Why the fixtures never caught it.** `test_editor_shapes.py` uses `cm: 20`,
+  and every hand-written run in the suite picks a comfortable number in the
+  middle. The one value a team member gets for free, by clicking the button,
+  was the one value never tested — the same lesson as the four-state fixture in
+  3.1, arriving from the other direction.
+
+  **A wrong turn of my own, recorded because the reasoning was the fault.**
+  My first attempt guarded the time gate with `if time < 0: return False`,
+  reasoning that `normalize_segm_time` *wraps* negatives (`total_time + time
+  - 1`) rather than clamping, so they had to be excluded. That deleted a
+  marker the robot has actually driven: the goldens dropped from
+  `MARKERS = (1764, 7942)` to `MARKERS = (1764,)`, because wrapping is not a
+  hazard to defend against — it is precisely how "1ms before the end" is
+  implemented, and `markers_relative` pins it with
+  `.addRelativeTemporalMarker(-1, _action)`. Twelve tests went red, all of
+  them earned. The gate now normalises first and tests what the callers will
+  actually index with.
+
+  **`binary_search` cannot return the last index**: it narrows with
+  `while left + 1 < right` and returns `left`, so asking for the end of a 40cm
+  drive answers with the state before it. Proved away from any trajectory — on
+  `list(range(11))` it resolves 0, 1, 5 and 9 correctly and returns index 9
+  for target 10. That needed an explicit last-state case.
+
+  **But that was not why the exact end was refused, and I guessed three times
+  before printing the number.** I blamed the interval, then a stale `.pyc`,
+  then a shadowed import — checking each only well enough to move on. The
+  actual value ends the argument at once:
+
+      asked      : 40.0
+      states[-1] : 39.99999997400722
+      asked - last = 2.6e-08   ->  closed test: False
+
+  A 40cm drive never quite reaches 40cm. The step's own length, the number the
+  planner puts on screen, is 26 nanometres past where the profile stops, and
+  `in_closed_interval` was right to reject it — my last-state branch sat behind
+  a test that had already returned. The fix is a tolerance of 0.001cm, which
+  must be coarser than the 3-decimal rounding markers get on the way in
+  (`__process_relatives_into_absolutes_displacement`) while segment
+  displacements carry full float error. The two sides are quantised
+  differently by construction.
+
+  The lesson is the one this project keeps teaching in new clothes: three
+  plausible explanations cost more than one `repr()` of the value in dispute.
+
+  With both gates and the tolerance in place: **101 tests pass**, the six new
+  boundary cases among them, and the goldens and hub module are untouched.
+
+  **Still to fix: an action on a merged step fires in the step before it.**
+  Found while measuring the boundary, pinned in `test_merged_step_actions.py`
+  as xfail rather than patched, because it wants its own tests-first pass:
+
+      cm: 15 on the second of two 30cm drives  ->  1042ms
+      cm: 30 on the second of two 30cm drives  ->  1584ms
+      cm: 30 on a single 60cm drive            ->  1584ms
+
+  The last two being identical is the whole bug. Consecutive drives merge into
+  one profile, and a distance-based action on the *second* drive is measured
+  from the start of that profile rather than from where its own step begins.
+  The second step spans `(3167, 3167)`, so every action attached to it fires
+  during the first — up to three seconds early, with no diagnostic at all.
+
+  It is worse for a team than the drop it was found next to. A dropped action
+  produces an arm that does not move, which is at least obviously broken; this
+  produces an arm that moves confidently at the wrong place on the mat, from a
+  file that looks correct.
+
+  **A turn covers no distance, so a cm-based action on one is meaningless.**
+  I predicted its states would share a single displacement, making
+  `left == right`. They do not, quite: an `AngularSegment` runs
+  `19.999997353207014 -> 20.0`, a span of about 2.6e-6 from floating-point
+  drift. So the interval admits only that sliver and every real cm value falls
+  outside it, while *time*-based actions on the same turn work perfectly
+  (`0ms` -> 1701, `-1ms` -> 3250, within a 1700–3250 span). The editor offers
+  "+ action while driving" on turns, and the distance field is the only way it
+  lets you place one — so that combination can never fire. That is a UI
+  question, not a builder patch: a turn needs its action placed in time.
+
+  **The marker offset is the library's own, and stays.** Marker times come
+  back one millisecond after the moment asked for — `ms: 0` gives 1, `ms: 500`
+  gives 501 — and `tests/golden/markers_relative.txt` opens with `1764 3708`,
+  neither a number anyone would invent. The boundary test asserts that
+  convention rather than a tidier one; correcting it would move every marker
+  time in every file already driven.
+
 - [ ] **3.3 Custom code action.** A CodeMirror 6 editor for a free-form action
   body, with `core` in scope. Check syntax in the worker with `compile()`; we
   cannot run it (Pybricks APIs are hub-only). Warn on obviously blocking calls

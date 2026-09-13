@@ -95,6 +95,33 @@
       .problem.warning { color: #ffca7a; }
       .problem.error { color: #ff8a80; }
 
+      /* a sequential arm step: the robot waits for it, so it reads as a step */
+      .step.arm { border-left: 3px solid #00e5ff; }
+
+      /* parallel actions hang under the move they ride along with */
+      .action {
+        flex-basis: 100%;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 5px 0 0 22px;
+        padding-left: 10px;
+        border-left: 2px solid #2a2e34;
+        color: #8a8f98;
+      }
+      .action select { max-width: 120px; }
+      .action input[type="number"] { width: 56px; }
+
+      .addaction {
+        flex-basis: 100%;
+        margin: 5px 0 0 22px;
+        font-size: 12px;
+        color: #8a8f98;
+      }
+      .addaction button { font-size: 12px; padding: 2px 6px; }
+
+      .estimate { color: #6b7280; font-style: italic; }
+
       .step label { display: inline-flex; align-items: center; gap: 3px; color: #8a8f98; }
       .step label.reversed { gap: 5px; }
 
@@ -165,8 +192,8 @@
   <body>
     <h1>PythFinder planner</h1>
     <p class="sub">
-      Step 2.7 — name the run and download the file the hub imports. Problems
-      appear on the step that caused them; press play to watch it drive.
+      Step 3.2 — add an arm movement as its own step and the robot waits for
+      it; add one to a move and it happens while driving.
     </p>
 
     <div class="wrap">

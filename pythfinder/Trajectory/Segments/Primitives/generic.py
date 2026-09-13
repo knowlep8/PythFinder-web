@@ -170,7 +170,16 @@ class MotionSegment(ABC):
     def time_in_segment_segm_time(self, time: int) -> bool:
         if time is None: return False
 
-        return in_open_interval(self.normalize_segm_time(time), 0, len(self.states) - 1)
+        # Normalize first, then test what the callers will actually index
+        # with. A negative time is not an error here: wrapping it round the end
+        # (total_time + time - 1) is precisely how "1ms before the end" is
+        # expressed, and the run on the robot depends on it.
+        #
+        # Closed, so that a marker landing exactly on a segment's first or last
+        # state belongs to it. Open meant an action at the start of a step --
+        # what the planner's action button produces by default -- was silently
+        # discarded. All three callers are marker placement in trajectoryBuilder.
+        return in_closed_interval(self.normalize_segm_time(time), 0, len(self.states) - 1)
     
     def time_in_segment_traj_time(self, time: int) -> bool:
         return self.time_in_segment_segm_time(self.traj_time_to_segm_time(time))

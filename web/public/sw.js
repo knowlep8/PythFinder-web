@@ -7,9 +7,10 @@
  *
  * Two caches on purpose:
  *
- *   SHELL    the page and its bundle -- small, replaced on every deploy
- *   HEAVY    Pyodide, the wheel, the mat and the robot -- ~13MB, and unchanged
- *            between releases
+ *   SHELL    the page, its bundle and the library -- small, replaced on every
+ *            deploy
+ *   HEAVY    Pyodide, the mat and the robot -- ~13MB, and unchanged between
+ *            releases
  *
  * Bumping VERSION throws the shell away and keeps the heavy things, so a
  * deploy costs a few kilobytes rather than another 13MB over school wifi.
@@ -22,13 +23,30 @@
 
 // Bumped when this file changes, so a browser holding the previous worker
 // replaces it rather than going on serving the old app.
-const VERSION = "v3";
+const VERSION = "v4";
 const SHELL = `planner-shell-${VERSION}`;
 const HEAVY = "planner-heavy";
 
 /** The page itself. Its bundle is hashed by the build, so it is found by
  *  reading the page rather than named here -- see scriptsIn(). */
 const SHELL_FILES = ["/", "/index.html"];
+
+/**
+ * The library. Small, fetched once at start-up -- and shell, not heavy.
+ *
+ * It is tempting to file this with Pyodide: both are fetched once before the
+ * page can plan anything, and 110KB next to 13MB looks like a rounding error.
+ * But the heavy cache is cache-first and no VERSION bump ever clears it, which
+ * is right only for things that do not change. This wheel *is* PythFinder, so
+ * it changes whenever the Python half does.
+ *
+ * Cached as heavy, it pinned the library a browser first met: the planner went
+ * on rejecting an arm step the deployed library had long understood, and no
+ * reload could shift it -- a worker answers from its cache before the network
+ * is consulted, so `cache: "reload"` never reaches the host either. Here, a
+ * deploy replaces it like the bundle, and the gym still works offline.
+ */
+const WHEEL = "/pythfinder.whl";
 
 /**
  * The hashed files the page loads, dug out of the HTML during install.
@@ -59,14 +77,13 @@ async function scriptsIn(html) {
  * The big fixed things, fetched during install rather than waited for.
  *
  * Caching these only when they are requested does not work: the page asks for
- * Pyodide, the wheel and the pictures while it is starting, which is before
- * the worker has taken control of the page. Nothing passes through it, the
- * heavy cache stays empty, and the first visitor to lose the host finds the
- * planner will not open -- while testing appears to pass, because the
- * browser's own HTTP cache still holds them.
+ * Pyodide and the pictures while it is starting, which is before the worker
+ * has taken control of the page. Nothing passes through it, the heavy cache
+ * stays empty, and the first visitor to lose the host finds the planner will
+ * not open -- while testing appears to pass, because the browser's own HTTP
+ * cache still holds them.
  */
 const HEAVY_FILES = [
-  "/pythfinder.whl",
   "/field/mat.png",
   "/field/robot.png",
   "/pyodide/pyodide.mjs",
@@ -78,9 +95,7 @@ const HEAVY_FILES = [
 
 /** Big, and identical for the life of a release. */
 const isHeavy = (url) =>
-  url.pathname.startsWith("/pyodide/") ||
-  url.pathname.startsWith("/field/") ||
-  url.pathname === "/pythfinder.whl";
+  url.pathname.startsWith("/pyodide/") || url.pathname.startsWith("/field/");
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -102,8 +117,12 @@ self.addEventListener("install", (event) => {
           }
         }
 
+        // forgiving, and the wheel rides along: one missing file must not cost
+        // the page its whole offline shell
         await Promise.all(
-          [...new Set(scripts)].map((src) => cache.add(src).catch(() => undefined)),
+          [...new Set([...scripts, WHEEL])].map((src) =>
+            cache.add(src).catch(() => undefined),
+          ),
         );
       }),
 
@@ -135,6 +154,35 @@ self.addEventListener("activate", (event) => {
             .filter((name) => name.startsWith("planner-shell-") && name !== SHELL)
             .map((name) => caches.delete(name)),
         ),
+      )
+      // Workers up to v3 filed the wheel in the heavy cache, which nothing
+      // clears. Left there it would answer for ever, since the fetch handler
+      // checks caches by name and not by policy. Evicting it is what actually
+      // frees an already-poisoned browser -- the rest of this change only
+      // stops it happening again.
+      .then(() => caches.open(HEAVY).then((cache) => cache.delete(WHEEL)))
+
+      // And refresh the wheel itself on every activation, rather than trusting
+      // whatever a previous version's install put there.
+      //
+      // Moving it to the shell was not enough on its own: the shell is only
+      // discarded when VERSION changes, and VERSION lives in this file. A
+      // deploy that changes only the Python half ships a new wheel while this
+      // worker stays byte-identical -- so update() finds nothing to install,
+      // install never re-runs, and the browser keeps the library it had. That
+      // is the same trap as the heavy cache, one layer up, and it cost a
+      // second round of it here before being spotted.
+      //
+      // Failure is survivable on purpose: if the host is unreachable the old
+      // copy stays, which is what a gym with no wifi needs.
+      .then(() =>
+        fetch(WHEEL, { cache: "no-store" })
+          .then((response) =>
+            keepable(response)
+              ? caches.open(SHELL).then((cache) => cache.put(WHEEL, response))
+              : undefined,
+          )
+          .catch(() => undefined),
       )
       .then(() => self.clients.claim()),
   );

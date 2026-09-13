@@ -5,16 +5,42 @@
  * is that file's docstring. Keep them honest with each other.
  */
 
+/** What a motor is told to do. Becomes a line of Python in the hub file. */
+export interface MotorCommand {
+  motor: "leftTask" | "rightTask";
+  /** `run` and `stop` return at once; the rest finish and can be waited for */
+  call: "run" | "stop" | "run_angle" | "run_target" | "run_until_stalled";
+  speed?: number;
+  angle?: number;
+}
+
 export interface RunAction {
   id: string;
-  /** when in the step: distance into it, or a time. Negative counts back. */
-  at: { cm?: number; ms?: number };
-  /** carried for the generated file in phase 3; build_run ignores it */
-  do?: unknown;
+  /**
+   * When in the step it happens: a distance into it, or a time, with negative
+   * counting back from the end.
+   *
+   * A sequential arm step leaves this out — it *is* the step, so it starts as
+   * the robot comes to rest, and build_run works out when that is.
+   */
+  at?: { cm?: number; ms?: number };
+  do?: MotorCommand;
   label?: string;
 }
 
-export type StepType = "drive" | "wait" | "turn" | "toPoint" | "toPose";
+export type StepType =
+  | "drive"
+  | "wait"
+  | "turn"
+  | "toPoint"
+  | "toPose"
+  /**
+   * The robot stops, the arm runs to completion, the next step waits.
+   *
+   * Its motor command lives on the step itself rather than in `actions`,
+   * because the step and the movement are the same thing.
+   */
+  | "armStep";
 
 export interface RunStep {
   type: StepType;
@@ -25,6 +51,13 @@ export interface RunStep {
   y?: number;
   head?: number;
   reversed?: boolean;
+
+  /** armStep only: which motor, and how it is told to move */
+  motor?: MotorCommand["motor"];
+  call?: MotorCommand["call"];
+  speed?: number;
+  angle?: number;
+
   actions?: RunAction[];
 }
 

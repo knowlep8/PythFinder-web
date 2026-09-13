@@ -503,11 +503,36 @@ class TrajectoryBuilder():
         return state.displacement
 
     def __find_segm_time_from_displacement(self, displacement: float, segment: MotionSegment) -> int:
-        if not in_open_interval(displacement, 
-                              left = segment.states[0].displacement, 
-                              right = segment.states[-1].displacement):
+        last = segment.states[-1].displacement
+
+        # A 40cm drive does not end at 40cm. The profile integrates to
+        # 39.99999997, so asking for "40" -- the step's own length, the number
+        # the planner shows -- is 26 nanometres past the end and a strict test
+        # refuses it. Markers are rounded to 3 decimals on the way in
+        # (__process_relatives_into_absolutes_displacement), while segment
+        # displacements carry full float error, so the two sides are quantised
+        # differently by construction. The tolerance has to be coarser than
+        # that rounding, which is why it is 0.001cm -- ten microns, far below
+        # anything a robot can be asked to do, and far above the drift.
+        if displacement > last and displacement - last <= 0.001:
+            displacement = last
+
+        # Closed, not open: a marker sitting exactly on the segment's first or
+        # last state belongs to it. An open test made "at the start of this
+        # step" -- what the planner's action button produces by default --
+        # impossible to express, and dropped it silently.
+        if not in_closed_interval(displacement,
+                              left = segment.states[0].displacement,
+                              right = last):
             return None
-        
+
+        # The last state needs saying out loud. binary_search narrows with
+        # `while left + 1 < right` and returns `left`, so it can never return
+        # the final index -- ask it for the end of a 40cm drive and it answers
+        # with the state before it.
+        if displacement >= last:
+            return len(segment.states) - 1
+
         return binary_search(displacement, segment.states, "displacement")[0]
     
 
