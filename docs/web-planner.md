@@ -833,7 +833,8 @@ working, correctly ordered marker functions.
   generated module to its docstring, because the import sits directly under it.
   The constants are picked out by name now.)
 
-- [ ] **3.2 Action blocks.** Attach to a step at "X cm in", "X ms in", or
+- [x] **3.2 Action blocks.** *Both kinds working in the browser, generating
+  real hub code — not yet driven on the robot.* Attach to a step at "X cm in", "X ms in", or
   "X before the end" (negative values, as the builder already supports).
   Offered blocks only use non-blocking calls, because markers run inline on the
   hub's drive loop:
@@ -1006,6 +1007,28 @@ working, correctly ordered marker functions.
   neither a number anyone would invent. The boundary test asserts that
   convention rather than a tidier one; correcting it would move every marker
   time in every file already driven.
+
+  **The hub test that is still owed.** No planner-made marker has ever fired
+  on the robot — the run driven in 3.1 had `MARKERS = ()`. `run_actions.py` in
+  the repository root is generated for exactly that: 4.3 seconds, 725 states,
+  `MARKERS = (1, 2086)`, one action of each kind.
+
+      _action_1  core.leftTask.run(500)                       at 1ms
+      _action_2  core.leftTask.run_angle(500, 90, wait=True)  at 2086ms
+
+  Drive forward 30cm, arm down as it sets off; the arm then lifts 90° with the
+  robot stationary; then back 30cm. Add it to `runs.py` and call
+  `run_actions.run(core)`.
+
+  Three things only the robot can answer, and each has a visible tell:
+
+  - the parallel action fires **at the very start** — the arm should move as
+    the robot sets off, not after. This is the `cm: 0` case that was silently
+    dropped until the boundary fix, and it has never run on hardware;
+  - the sequential action **blocks the follow loop** and the clock discounts
+    it, so the return leg should still be 30cm. If the compensation is wrong
+    the robot comes back short or long — measure where it stops;
+  - both fire **in order**, once each.
 
 - [ ] **3.3 Custom code action.** A CodeMirror 6 editor for a free-form action
   body, with `core` in scope. Check syntax in the worker with `compile()`; we

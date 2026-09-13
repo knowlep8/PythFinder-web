@@ -109,7 +109,9 @@
         border-left: 2px solid #2a2e34;
         color: #8a8f98;
       }
-      .action select { max-width: 120px; }
+      /* wide enough for "until it stops" and "start turning": at 120px they
+         clip to "start turn:", which reads as a different instruction */
+      .action select { max-width: 150px; }
       .action input[type="number"] { width: 56px; }
 
       .addaction {
