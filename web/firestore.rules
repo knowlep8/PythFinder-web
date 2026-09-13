@@ -1,0 +1,22 @@
+rules_version = '2';
+
+// Saved runs, self-declared name only -- there is no login on this site at
+// all (docs/web-planner.md: the team has no email between them to
+// authenticate with). Open by design: the point is stopping Jake
+// absent-mindedly saving over Amy's run_a, not keeping anyone out. Anyone
+// who reads or writes here can read or write anyone else's runs too, on
+// purpose, and that is an accepted tradeoff, not an oversight.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /runs/{owner}/items/{name} {
+      allow read, write: if true;
+    }
+
+    // The "all saved runs" mentor view runs a collection-group query across
+    // every owner's items subcollection. Firestore requires its own rule for
+    // that shape even though the path rule above already allows it directly.
+    match /{path=**}/items/{name} {
+      allow read: if true;
+    }
+  }
+}

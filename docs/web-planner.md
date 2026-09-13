@@ -612,25 +612,31 @@ working hub file. No actions yet.
   the top of the table, and the off-mat marking from 2.6 drew a long red
   stretch with a 45.7cm warning on the step that caused it. Until then that
   path had only been exercised against a 0.7cm pirouette.
-  - **Built, revised for a hostless deploy and a teamless login: `functions/
-    api/runs/` on Cloudflare Pages, backed by a KV namespace instead of a
-    mounted folder** — there is no container to mount one in once step 2.1's
-    open decision landed on Pages, and no Access identity to key it by once
-    the team turned out to have no email between them (see the gating
-    decision below). "Who may overwrite whose run" is answered by a name
-    typed into the page, not authenticated: `runs/<owner>/<run-name>` in KV,
-    where `<owner>` is whatever a team member typed into a "who's driving"
-    box, remembered per browser. It stops Jake absent-mindedly saving over
-    Amy's `run_a`, which was the actual problem; it does not stop anyone
-    reading or overwriting anyone else's on purpose, which the team does not
-    need it to, having chosen to skip gating entirely.
-    `GET/PUT/DELETE /api/runs/<owner>/<name>` mirrors the plan's own sketch;
-    `GET /api/runs/all` — every owner, every run — is the one addition, for
-    a mentor to see the whole team's saved work. Browser storage stays the
-    fallback exactly as planned: every call in `store.ts`'s new remote
-    functions is best-effort and fails closed to local-only, so a flaky host
-    is a reason a run does not follow you to another laptop yet, never a
-    reason the planner stops working.
+  - **Built, revised twice: once for a hostless deploy, once for a
+    network that could not reach that host.** First landed as Cloudflare
+    Pages Functions over a KV namespace — no container to mount a folder in
+    once 2.1 chose Pages, no Access identity to key it by once the team
+    turned out to have no email (see the gating decision below). Then moved
+    again once it turned out the team's own network allows
+    `*.firebaseapp.com` but not `*.pages.dev` at all, which forced the actual
+    hosting question, not just the storage question — see the "which host
+    reaches the team" row in *Open decisions*. **Runs now live in
+    Firestore, read and written straight from the browser** — `runs/<owner>/
+    items/<name>`, no backend of ours in between — with `firestore.rules`
+    doing what the Pages Functions used to check by hand. Same design either
+    way: "who may overwrite whose run" is answered by a name typed into the
+    page, not authenticated, where `<owner>` is whatever a team member typed
+    into a "who's driving" box, remembered per browser. It stops Jake
+    absent-mindedly saving over Amy's `run_a`, which was the actual problem;
+    it does not stop anyone reading or overwriting anyone else's on purpose,
+    which the team does not need it to, having chosen to skip gating
+    entirely. The "all saved runs" mentor view is a Firestore
+    collection-group query across every owner's `items` — the one addition
+    beyond the plan's own sketch, for a mentor to see the whole team's saved
+    work. Browser storage stays the fallback exactly as planned: every call
+    in `store.ts`'s remote functions is best-effort and fails closed to
+    local-only, so a flaky host is a reason a run does not follow you to
+    another laptop yet, never a reason the planner stops working.
 - [x] **2.9 Work without the host.**
   - `web/public/sw.js` keeps two caches: a shell for the page and its bundle,
     replaced on every deploy, and a heavy one for Pyodide, the wheel and the
@@ -1470,8 +1476,9 @@ Decide when we reach the step named. The recommendation is the default.
 
 | Decision | Step | Recommendation |
 |---|---|---|
-| Run self-hosted (VPS, or at home behind a Cloudflare tunnel), or serve as a static Cloudflare Pages deploy? | 2.1 (first deploy) | **Decided 2026-09-13: Pages.** The page has no server-side logic — everything still runs in the browser through Pyodide, per decision 2 — so there is nothing a host needs to *do*, only files to serve, and Pages serves those straight from Cloudflare's edge with no machine to keep up and no tunnel in the chain. `docker compose`/`nginx.conf`/`Dockerfile` stay as the local dev/test path, not the deploy path; `.github/workflows/deploy-pages.yaml` builds the wheel and the site and pushes to Pages on every push to `main`. Cloudflare Access still fronts it exactly as it would a tunnel hostname. The one thing this closes off: step 2.8's optional self-hosted storage API needs a filesystem, which Pages doesn't have — it would become a Worker backed by KV or D1 instead, if ever built. |
-| Gate the site with Cloudflare Access, or skip gating? | 2.1 | **Decided 2026-09-13: skip it.** Access is identity-based — email one-time codes, or an IdP login — and no team member has an email to receive one. The site relies on an unlisted URL instead: adequate for what this actually needs to guard against (per decision 2, "keep strangers from stumbling onto it," not a real adversary), and it is a run planner, not a system with anything sensitive in it. Saved runs are scoped by a self-declared name instead of an authenticated identity — see step 2.8's revision. |
+| Run self-hosted (VPS, or at home behind a Cloudflare tunnel), or serve as a static deploy? | 2.1 (first deploy) | **Decided 2026-09-13: a static deploy.** The page has no server-side logic — everything still runs in the browser through Pyodide, per decision 2 — so there is nothing a host needs to *do*, only files to serve. `docker compose`/`nginx.conf`/`Dockerfile` stay as the local dev/test path, not the deploy path. Which static host, specifically, is the next row — that turned out not to be settled by this decision alone. |
+| Which host actually reaches the team? | 2.1 | **Decided 2026-09-13, twice.** First: Cloudflare Pages, on the reasoning above — `.github/workflows/deploy-pages.yaml` builds and deploys it, and Cloudflare Access was going to front it exactly as it would a tunnel hostname. Then it turned out **the team's own network allows `*.firebaseapp.com` but not `*.pages.dev` at all** — the kids literally cannot reach a `pages.dev` domain, which no amount of Access configuration fixes. Landed on **Firebase Hosting** as the deploy the team actually uses (`.github/workflows/deploy-firebase.yaml`, landing on `pythfinder-planner.firebaseapp.com`), with the Cloudflare Pages deploy kept running alongside as a mentor-only mirror rather than torn out — it costs nothing to leave, and is useful from anywhere that *can* reach it. Saved runs (see step 2.8's revision) work identically from either host, since the page talks to Firestore directly from the browser rather than to anything host-specific. |
+| Gate the site with Cloudflare Access, or skip gating? | 2.1 | **Decided 2026-09-13: skip it.** Access is identity-based — email one-time codes, or an IdP login — and no team member has an email to receive one. The site relies on an unlisted URL instead: adequate for what this actually needs to guard against (per decision 2, "keep strangers from stumbling onto it," not a real adversary), and it is a run planner, not a system with anything sensitive in it. This decision was made moot for the primary deploy anyway once Firebase Hosting replaced Cloudflare Pages as the one the team uses — Firebase Hosting has no equivalent to Access at all on the free plan. Saved runs are scoped by a self-declared name instead of an authenticated identity — see step 2.8's revision. |
 | Upstream the headless refactor to omegacoreFLL/PythFinder, or keep it in our fork? | end of 1 | Offer upstream once goldens prove nothing changed |
 | One fixed team robot, or editable robot settings? | 4.2 | Fixed for the season; editable behind the mentor toggle |
 | How `run()` gets the data on the hub (`fromValues` vs a module self-import) | 3.1 | Whichever works on the hub; test both |

@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.firebase/
 
 # Build artefacts, fetched or built before dev and before build:
 #   public/pyodide/   copied out of node_modules by scripts/copy-pyodide.mjs

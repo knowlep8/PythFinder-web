@@ -1,19 +1,15 @@
-name: Deploy planner to Cloudflare Pages
+name: Deploy planner to Firebase Hosting
 
-# The planner has no server-side logic -- all the Python runs in the browser
-# through Pyodide -- so it is served as a static build from Cloudflare's edge
-# rather than from the container on main. See the "Run self-hosted, or as a
-# static Pages deploy?" row in docs/web-planner.md.
+# The team's network only allows *.firebaseapp.com, not *.pages.dev -- see
+# the "reach the team" row in docs/web-planner.md. This is the deploy the
+# kids actually use; deploy-pages.yaml's Cloudflare Pages deploy is kept
+# running alongside it as a mentor-only mirror, not removed.
 #
-# Kept running as a mentor-only mirror, not removed: the team's network turned
-# out to only allow *.firebaseapp.com, not *.pages.dev, so deploy-firebase.yaml
-# is what the kids actually use. Saved runs work the same from either host --
-# they talk to Firestore directly from the browser, not to anything specific
-# to this deploy.
-#
-# Needs two repository secrets: CLOUDFLARE_API_TOKEN and
-# CLOUDFLARE_ACCOUNT_ID. The Pages project itself (pythfinder-planner) is
-# created once, by hand, in the Cloudflare dashboard.
+# Needs one repository secret: FIREBASE_TOKEN, from `firebase login:ci` run
+# locally (interactive; the CLI cannot do this non-interactively). The
+# Firebase project (pythfinder-planner), its Hosting site, and its Firestore
+# database are all created once, by hand / via the Firebase CLI -- see
+# web/README.md.
 
 on:
     push:
@@ -24,7 +20,7 @@ on:
             - "pythfinder/**"
             - "tools/slim_wheel.py"
             - "pyproject.toml"
-            - ".github/workflows/deploy-pages.yaml"
+            - ".github/workflows/deploy-firebase.yaml"
     workflow_dispatch:
 
 jobs:
@@ -59,16 +55,17 @@ jobs:
 
             # npm run build's own `prebuild` copies Pyodide out of node_modules
             # and the mat/robot images out of pythfinder/Images -- both read
-            # straight from this checkout, same as the Dockerfile's stages did.
+            # straight from this checkout.
             - name: Build the site
               working-directory: web
               run: |
                   npm ci
                   npm run build
 
-            - name: Deploy to Cloudflare Pages
-              uses: cloudflare/wrangler-action@v3
-              with:
-                  apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-                  accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-                  command: pages deploy web/dist --project-name=pythfinder-planner
+            # firebase.json and .firebaserc live in web/, so hosting's "public"
+            # path (dist) and the project id both resolve from there.
+            - name: Deploy to Firebase Hosting and Firestore rules
+              working-directory: web
+              run: npx firebase-tools deploy --only hosting,firestore:rules --token "$FIREBASE_TOKEN"
+              env:
+                  FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}

@@ -18,6 +18,7 @@
     "@codemirror/lang-python": "^6.2.1",
     "@codemirror/view": "^6.43.11",
     "codemirror": "^6.0.2",
+    "firebase": "^12.19.0",
     "pyodide": "^0.28.0"
   },
   "devDependencies": {

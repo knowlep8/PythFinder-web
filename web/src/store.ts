@@ -21,6 +21,16 @@
  * for a team member to lose their run.
  */
 
+import {
+  collection,
+  collectionGroup,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+} from "firebase/firestore";
+import { db } from "./firebase";
 import type { Run } from "./types";
 
 const WORKING = "pythfinder.working";
@@ -171,12 +181,39 @@ export interface RemoteRunSummary {
 }
 
 /**
- * The shared store: functions/api/runs/ in the deployed site, backed by a
- * Cloudflare KV namespace keyed by owner. Every call here is best-effort --
- * network trouble, or the KV namespace not being configured yet (see
- * web/wrangler.toml), is not a reason to interrupt anyone, only a reason the
- * run stays local until the host is reachable again.
+ * The shared store: Firestore, at runs/<owner>/items/<name>, opened directly
+ * from the browser -- no backend of our own, since firestore.rules is the
+ * only thing standing between a request and the data either way. Every call
+ * here is best-effort: network trouble, or Firestore refusing a request, is
+ * not a reason to interrupt anyone, only a reason the run stays local until
+ * the host is reachable again.
  */
+
+function runDoc(owner: string, name: string) {
+  return doc(db, "runs", owner, "items", name);
+}
+
+interface StoredRun {
+  owner: string;
+  name: string;
+  savedAt: string;
+  run: Run;
+}
+
+function summaryOf(data: unknown): RemoteRunSummary | null {
+  const stored = data as Partial<StoredRun> | undefined;
+
+  if (
+    stored === undefined ||
+    typeof stored.owner !== "string" ||
+    typeof stored.name !== "string" ||
+    typeof stored.savedAt !== "string"
+  ) {
+    return null;
+  }
+
+  return { owner: stored.owner, name: stored.name, savedAt: stored.savedAt };
+}
 
 /** Save under this owner and name, replacing any run already using both. */
 export async function saveRemote(owner: string, name: string, run: Run): Promise<boolean> {
@@ -184,17 +221,11 @@ export async function saveRemote(owner: string, name: string, run: Run): Promise
     return false;
   }
 
-  try {
-    const response = await fetch(
-      `/api/runs/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
-      {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(run),
-      },
-    );
+  const stored: StoredRun = { owner, name, savedAt: new Date().toISOString(), run };
 
-    return response.ok;
+  try {
+    await setDoc(runDoc(owner, name), stored);
+    return true;
   } catch {
     return false;
   }
@@ -207,15 +238,11 @@ export async function listRemote(owner: string): Promise<RemoteRunSummary[]> {
   }
 
   try {
-    const response = await fetch(`/api/runs?owner=${encodeURIComponent(owner)}`);
+    const snapshot = await getDocs(collection(db, "runs", owner, "items"));
 
-    if (!response.ok) {
-      return [];
-    }
-
-    const body = (await response.json()) as { runs?: RemoteRunSummary[] };
-
-    return body.runs ?? [];
+    return snapshot.docs
+      .map((entry) => summaryOf(entry.data()))
+      .filter((entry): entry is RemoteRunSummary => entry !== null);
   } catch {
     return [];
   }
@@ -224,15 +251,12 @@ export async function listRemote(owner: string): Promise<RemoteRunSummary[]> {
 /** Every saved run, from every owner -- the mentor view. */
 export async function listAllRemote(): Promise<RemoteRunSummary[]> {
   try {
-    const response = await fetch("/api/runs/all");
+    const snapshot = await getDocs(collectionGroup(db, "items"));
 
-    if (!response.ok) {
-      return [];
-    }
-
-    const body = (await response.json()) as { runs?: RemoteRunSummary[] };
-
-    return body.runs ?? [];
+    return snapshot.docs
+      .map((entry) => summaryOf(entry.data()))
+      .filter((entry): entry is RemoteRunSummary => entry !== null)
+      .sort((a, b) => a.owner.localeCompare(b.owner) || a.name.localeCompare(b.name));
   } catch {
     return [];
   }
@@ -240,17 +264,15 @@ export async function listAllRemote(): Promise<RemoteRunSummary[]> {
 
 export async function openRemote(owner: string, name: string): Promise<Run | null> {
   try {
-    const response = await fetch(
-      `/api/runs/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
-    );
+    const snapshot = await getDoc(runDoc(owner, name));
 
-    if (!response.ok) {
+    if (!snapshot.exists()) {
       return null;
     }
 
-    const run = await response.json();
+    const stored = snapshot.data() as Partial<StoredRun>;
 
-    return looksLikeRun(run) ? run : null;
+    return looksLikeRun(stored.run) ? stored.run : null;
   } catch {
     return null;
   }
@@ -258,9 +280,7 @@ export async function openRemote(owner: string, name: string): Promise<Run | nul
 
 export async function forgetRemote(owner: string, name: string): Promise<void> {
   try {
-    await fetch(`/api/runs/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`, {
-      method: "DELETE",
-    });
+    await deleteDoc(runDoc(owner, name));
   } catch {
     // best-effort -- the local copy is already gone either way
   }

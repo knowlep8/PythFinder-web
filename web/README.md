@@ -83,36 +83,39 @@ container needs nothing from a CDN.
 
 ## Deploying it
 
-The container above is for local dev and testing. The real deploy is
-Cloudflare Pages: `.github/workflows/deploy-pages.yaml` builds the wheel and
-the site and runs `wrangler pages deploy` on every push to `main`. See the
-"Run self-hosted, or as a static Pages deploy?" row in `docs/web-planner.md`
-for why, and the workflow file for the two repository secrets it needs.
+The container above is for local dev and testing. The real deploy the team
+uses is **Firebase Hosting**: `.github/workflows/deploy-firebase.yaml` builds
+the wheel and the site and runs `firebase deploy` on every push to `main`,
+landing on `pythfinder-planner.firebaseapp.com`. That is the one the kids
+can actually reach -- the network their laptops are on allows
+`*.firebaseapp.com` but not `*.pages.dev`, which is why this exists
+alongside, not instead of, the Cloudflare deploy below.
 
-Two things only have to be done once, by hand, in the Cloudflare dashboard,
-because nothing here can create them on your behalf:
+`deploy-pages.yaml` still deploys the same build to Cloudflare Pages too,
+kept running as a mentor-only mirror -- useful from anywhere that *can*
+reach it, and free to leave running since it costs nothing. Saved runs work
+identically from either host: the page talks to Firestore directly from the
+browser, not to anything specific to one deploy.
 
-- the Pages project itself, named `pythfinder-planner`;
-- the KV namespace `wrangler.toml` binds as `RUNS` -- run
-  `npx wrangler kv namespace create RUNS` from this directory and paste the
-  id it prints into `wrangler.toml`. Until that id is real, saving and
-  opening runs from another laptop fails closed: the planner still works,
-  it just falls back to browser-only storage (see `src/store.ts`).
+Firebase needs, once, by hand:
+
+- a Firebase project (`pythfinder-planner`) with a Web App registered in it,
+  and its Firestore database created -- see `firebase.json`/`.firebaserc`/
+  `firestore.rules` and `src/firebase.ts`'s config for what already exists;
+- the `FIREBASE_TOKEN` repository secret, from `npx firebase-tools
+  login:ci` run locally (interactive; there is no non-interactive way to get
+  one, so CI cannot generate this itself).
 
 ## Saved runs across laptops
 
-`functions/api/runs/` is a small set of Cloudflare Pages Functions --
-`GET`/`PUT`/`DELETE /api/runs/<owner>/<name>`, plus `GET /api/runs/all` for
-every owner's runs at once. `<owner>` is whatever name someone typed into the
-page, not an authenticated identity: this site has no login (see
+Runs are saved straight to **Firestore** from the browser --
+`runs/<owner>/items/<name>`, where `<owner>` is whatever name someone typed
+into the page, not an authenticated identity: this site has no login (see
 `docs/web-planner.md`), so the point is keeping people from typing over each
-other's runs by accident, not keeping anyone out.
+other's runs by accident, not keeping anyone out. `firestore.rules` is what
+actually enforces (or in this case, deliberately does not enforce) who can
+read or write what -- there is no backend of our own in between.
 
-These Functions do not run under plain `vite dev` -- Vite only serves the
-static site. To exercise the API locally, build the site once and run it
-through Wrangler instead:
-
-```bash
-npm run build
-npx wrangler pages dev dist
-```
+`src/firebase.ts` holds the project config Firestore needs to find itself;
+it is not a secret, only a project id, so it is fine to commit. Access
+control is entirely `firestore.rules`'s job.
