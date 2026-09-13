@@ -434,7 +434,12 @@ async function main() {
   });
 
   document.addEventListener("keydown", (event) => {
-    const typing = event.target instanceof HTMLInputElement;
+    // an <input>, or CodeMirror's contenteditable surface for a code action
+    // (step 3.3) -- without the second check, a space typed into the code
+    // editor falls through and toggles playback instead of being typed
+    const typing =
+      event.target instanceof HTMLInputElement ||
+      (event.target instanceof HTMLElement && event.target.isContentEditable);
 
     if (event.code === "Space" && !typing) {
       event.preventDefault();

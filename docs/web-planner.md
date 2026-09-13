@@ -1079,10 +1079,91 @@ working, correctly ordered marker functions.
     markers in a row is a harder test of that than one;
   - all three fire **in order**, once each.
 
-- [ ] **3.3 Custom code action.** A CodeMirror 6 editor for a free-form action
-  body, with `core` in scope. Check syntax in the worker with `compile()`; we
-  cannot run it (Pybricks APIs are hub-only). Warn on obviously blocking calls
-  (`wait(`, `run_angle(` without `wait=False`, `while`).
+- [x] **3.3 Custom code action.** A parallel action is now either kind, chosen
+  from a small picker on its own row: **Run motor**, the existing picker, or
+  **Custom code**, a CodeMirror 6 editor with `core` in scope, for whatever the
+  picker cannot say — reading a sensor, counting something, moving two motors
+  from one action.
+
+  **Where the two checks the plan asked for actually live.** "Check syntax in
+  the worker with `compile()`" turned out to need no new protocol at all:
+  `build_run` already runs inside the worker on every change, and `compile()`
+  is a plain builtin — Pyodide is CPython, so it behaves exactly as it would
+  on the desktop. A `SyntaxError` becomes an error-level `Diagnostic` with
+  Python's own message, on the step that has it; the existing `ok` gate that
+  already disables the save button for any error did the rest with no new
+  plumbing. The blocking-call check (`wait(`, `while`, and `run_angle(` /
+  `run_target(` without `wait=False` — the plan named only `run_angle`, but
+  `run_target` waits by default for the same reason, per `_call_for`) is
+  substring matching, exactly as specified, and comes back as warnings, which
+  the existing `.troubled` styling already shows without treating them as
+  blocking.
+
+  **The generated code carries no guard.** A picker action gets
+  `if core.leftTask is not None:` because the picker names one motor the file
+  can check before touching it. Code the team wrote may reach any motor,
+  several, or none — there is nothing generic left to check, so it becomes
+  the function body verbatim, indented under the def with its own relative
+  indentation preserved. Blank code (an action mid-way through being typed)
+  becomes `pass # nothing written yet`, the same allowance an unplugged motor
+  picker already gets.
+
+  **A message bug the Python test didn't catch, and the browser did.** An
+  early version read *"this action's code calls run_angle) without
+  wait=False"* — one paren, not two. `call[:-1]` correctly dropped the
+  trailing `(` from `"run_angle("`, but the format string still appended a
+  bare `)` on its own, and the unit test only asserted `"run_angle" in
+  message`, which was true either way. Caught reading the actual diagnostic
+  text in the browser, fixed, and the test tightened to the exact wording —
+  the same shape as every other lesson this project keeps relearning: an
+  assertion loose enough to pass proves less than it looks like.
+
+  **A second bug the design caught before it shipped, not after.** CodeMirror's
+  editing surface is a `contenteditable` div, not an `<input>`. The page's own
+  Space-bar shortcut for play/pause checked only
+  `event.target instanceof HTMLInputElement`, so a space typed while writing
+  code would have fallen through and toggled playback instead of being typed.
+  Found while designing the integration, before any code shipped; fixed by
+  also checking `event.target.isContentEditable`, and confirmed in the browser
+  by dispatching a real `keydown` at the focused code editor and checking the
+  play icon never changed.
+
+  **One CodeMirror instance per action, kept alive across `render()`.** The
+  step list is fully rebuilt on every structural change — adding a step,
+  reordering, even switching a *different* action's kind — and the project's
+  own rule is that typing must never trigger one of those rebuilds. A fresh
+  `EditorView` on every rebuild would have been fine for typing itself, but
+  would reset anyone mid-edit in an action nothing structural touched: cursor
+  gone, undo history gone, the moment someone elsewhere added a step. Instead
+  each view is created once, keyed by the action's own id (ids already have to
+  be stable — the hub binds by them), and `render()` re-parents its DOM node
+  into whatever new row it built rather than discarding it; a `pruneCodeViews`
+  pass destroys the ones whose action no longer exists. Proved in the browser,
+  not just reasoned about: typing code, then adding an unrelated step
+  elsewhere, left the *same* `.cm-content` DOM node in place with its text
+  intact (`sameDomNode: true`).
+
+  The update listener looks its action up by id when it fires, rather than
+  closing over the index it was created with — a step can move, or an earlier
+  action can be removed, after the view exists, and a captured index would
+  then write to the wrong step.
+
+  **Styling is the app's own palette, not CodeMirror's default.** A custom
+  `EditorView.theme` sets background, text, caret and selection to match;
+  token colours are CodeMirror's stock highlight style, left alone deliberately
+  — hand-matching every Python token class to this palette was judged more
+  than a first version needs, and the defaults read fine on the dark
+  background as they are. `minimalSetup` rather than `basicSetup`: no line
+  numbers or gutter for what is usually one to three lines, `EditorView.
+  lineWrapping` so a long line wraps rather than scrolling, `indentWithTab`
+  added explicitly (CodeMirror leaves Tab free by default, for pages that
+  need it to move focus) since a code editor without a working Tab key would
+  be its own kind of broken.
+
+  Adds four packages — `codemirror`, `@codemirror/lang-python`,
+  `@codemirror/view`, `@codemirror/commands` — and about 110KB gzipped to the
+  bundle (21KB before). Checked against the 13MB Pyodide runtime it rides
+  alongside, not worth trimming.
 - [ ] **3.4 Python view.** Read-only panel showing the equivalent
   `TrajectoryBuilder` chain and the generated `run()`. It is for learning, and
   for pasting into the desktop tool.
@@ -1144,6 +1225,11 @@ As implemented in step 1.7 and understood by `build_run`.
   and negative values count back from the end of the step.
 - `do` and `label` are carried by the browser and written into the generated
   file in step 3; `build_run` only needs `id` and `at`.
+- `do` is either a motor command (`motor`, `call`, `speed`, `angle`) or, since
+  step 3.3, free-form code: `"do": {"code": "core.leftTask.run(500)"}`. Code
+  becomes the action's function body verbatim, with no motor guard; a motor
+  command gets `if core.<motor> is not None:` first, because it names one
+  motor the file can check before touching it.
 - `robot` is `"fll_team"`, or an object of numbers for the settings panel:
   `track_width_cm`, `max_velocity_cm_s`, and optionally `center_offset_cm`,
   `max_power`, `width_cm`, `length_cm`.

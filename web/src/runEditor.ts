@@ -16,7 +16,13 @@
  * keystroke.
  */
 
-import type { BuiltStep, Diagnostic, RunStep, StepType } from "./types";
+import { indentWithTab } from "@codemirror/commands";
+import { python } from "@codemirror/lang-python";
+import { keymap, placeholder, EditorView } from "@codemirror/view";
+import { minimalSetup } from "codemirror";
+
+import type { ActionBody, BuiltStep, Diagnostic, RunStep, StepType } from "./types";
+import { isCode } from "./types";
 
 export interface RunEditorHandlers {
   onChange?: (steps: RunStep[]) => void;
@@ -59,6 +65,41 @@ const INSTANT_CALLS: Array<[string, string]> = [
   ["run", "start turning"],
   ["stop", "stop"],
 ];
+
+/** A parallel action is either a motor from the picker, or code of its own. */
+const ACTION_KINDS: Array<[string, string]> = [
+  ["motor", "Run motor"],
+  ["code", "Custom code"],
+];
+
+/**
+ * Colours to match the page, not CodeMirror's own light default.
+ *
+ * Only the frame -- background, text, caret, selection. Token colours are
+ * CodeMirror's stock `defaultHighlightStyle`, left alone: hand-matching every
+ * token class to this palette is more than a first version needs, and stock
+ * colours read fine on a dark background as they are.
+ */
+const codeTheme = EditorView.theme(
+  {
+    "&": {
+      color: "#e6e6e6",
+      backgroundColor: "#101214",
+      border: "1px solid #333a42",
+      borderRadius: "4px",
+      fontSize: "13px",
+    },
+    ".cm-content": { caretColor: "#00e5ff", fontFamily: "inherit", padding: "6px 8px" },
+    ".cm-cursor, .cm-dropCursor": { borderLeftColor: "#00e5ff" },
+    "&.cm-focused": { outline: "1px solid #00e5ff" },
+    ".cm-activeLine": { backgroundColor: "#17191c" },
+    ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
+      backgroundColor: "#2a2e34",
+    },
+    ".cm-placeholder": { color: "#6b7280", fontStyle: "italic" },
+  },
+  { dark: true },
+);
 
 const SHAPES: Record<
   StepType,
@@ -147,6 +188,14 @@ export class RunEditor {
   private times: BuiltStep[] = [];
   private problems: Diagnostic[] = [];
   private selected: number | null = null;
+
+  // One CodeMirror instance per code action, keyed by the action's own id
+  // rather than its position. render() wipes and rebuilds the whole list on
+  // every structural change, so without this a fresh EditorView would be
+  // created every time -- dropping cursor position and undo history for
+  // whoever was mid-edit, even in an action nothing structural touched. See
+  // codeBox() and pruneCodeViews().
+  private codeViews = new Map<string, EditorView>();
 
   constructor(
     container: HTMLElement,
@@ -289,6 +338,7 @@ export class RunEditor {
     this.container.append(this.renderAdders());
     this.showTimes();
     this.showProblems();
+    this.pruneCodeViews();
   }
 
   /**
@@ -432,7 +482,7 @@ export class RunEditor {
   /** One thing that happens while this step is running. */
   private renderAction(index: number, which: number): HTMLElement {
     const action = (this.steps[index].actions ?? [])[which];
-    const command = action.do ?? { motor: "leftTask", call: "run", speed: 500 };
+    const body: ActionBody = action.do ?? { motor: "leftTask", call: "run", speed: 500 };
 
     const line = document.createElement("div");
     line.className = "action";
@@ -440,24 +490,35 @@ export class RunEditor {
     line.append(document.createTextNode("↳"));
 
     line.append(
-      this.picker(MOTORS, command.motor, (picked) => {
-        this.setCommand(index, which, { motor: picked as "leftTask" | "rightTask" });
-      }),
-      this.picker(INSTANT_CALLS, command.call, (picked) => {
-        this.setCommand(index, which, { call: picked as "run" | "stop" });
+      this.picker(ACTION_KINDS, isCode(body) ? "code" : "motor", (picked) => {
+        this.setActionKind(index, which, picked as "motor" | "code");
       }),
     );
 
-    if (command.call !== "stop") {
+    if (isCode(body)) {
+      line.append(document.createTextNode("at"));
+    } else {
       line.append(
-        this.number(String(command.speed ?? 500), "°/s", 50, (value) => {
-          this.setCommand(index, which, { speed: value });
+        this.picker(MOTORS, body.motor, (picked) => {
+          this.setCommand(index, which, { motor: picked as "leftTask" | "rightTask" });
+        }),
+        this.picker(INSTANT_CALLS, body.call, (picked) => {
+          this.setCommand(index, which, { call: picked as "run" | "stop" });
         }),
       );
+
+      if (body.call !== "stop") {
+        line.append(
+          this.number(String(body.speed ?? 500), "°/s", 50, (value) => {
+            this.setCommand(index, which, { speed: value });
+          }),
+        );
+      }
+
+      // when it happens, as a distance into the move
+      line.append(document.createTextNode("at"));
     }
 
-    // when it happens, as a distance into the move
-    line.append(document.createTextNode("at"));
     line.append(
       this.number(String(action.at?.cm ?? 0), "cm in", 1, (value) => {
         const actions = this.steps[index].actions;
@@ -473,6 +534,10 @@ export class RunEditor {
       this.button("✕", "remove this action", () => this.removeAction(index, which)),
     );
 
+    if (isCode(body)) {
+      line.append(this.codeBox(action.id, body.code));
+    }
+
     return line;
   }
 
@@ -483,13 +548,14 @@ export class RunEditor {
       return;
     }
 
-    const existing = actions[which].do ?? {
+    const existing = actions[which].do;
+    const base = existing && !isCode(existing) ? existing : {
       motor: "leftTask" as const,
       call: "run" as const,
       speed: 500,
     };
 
-    actions[which] = { ...actions[which], do: { ...existing, ...change } as typeof existing };
+    actions[which] = { ...actions[which], do: { ...base, ...change } };
 
     // the speed box appears and disappears with the call, which is structural
     if ("call" in change) {
@@ -497,6 +563,125 @@ export class RunEditor {
     }
 
     this.changed();
+  }
+
+  /** Switch a parallel action between the motor picker and free-form code. */
+  private setActionKind(index: number, which: number, kind: "motor" | "code") {
+    const actions = this.steps[index].actions;
+
+    if (!actions) {
+      return;
+    }
+
+    const body: ActionBody =
+      kind === "code" ? { code: "" } : { motor: "leftTask", call: "run", speed: 500 };
+
+    actions[which] = { ...actions[which], do: body };
+
+    this.render();
+    this.changed();
+  }
+
+  /**
+   * The CodeMirror editor for one code action, kept alive across render().
+   *
+   * render() wipes and rebuilds the whole step list on every structural
+   * change -- adding a step, reordering, even switching a *different*
+   * action's kind. A fresh EditorView every time would reset whoever was
+   * mid-edit in an unrelated action: cursor gone, undo history gone. Instead
+   * each action's view is created once, keyed by its own id, and its DOM
+   * node is re-parented into whatever new row render() built around it.
+   * pruneCodeViews() destroys the ones whose action no longer exists.
+   *
+   * The update listener looks the action up by id at the moment it fires,
+   * rather than closing over `index`/`which` at creation time -- a step can
+   * move (the ↑/↓ buttons) or an earlier action can be removed after this
+   * view was created, and either would leave a captured index pointing at
+   * the wrong step.
+   */
+  private codeBox(id: string, code: string): HTMLElement {
+    const existing = this.codeViews.get(id);
+
+    if (existing) {
+      if (existing.state.doc.toString() !== code) {
+        existing.dispatch({
+          changes: { from: 0, to: existing.state.doc.length, insert: code },
+        });
+      }
+
+      return existing.dom;
+    }
+
+    const view = new EditorView({
+      doc: code,
+      extensions: [
+        minimalSetup,
+        python(),
+        codeTheme,
+        EditorView.lineWrapping,
+        placeholder("core.leftTask.run(500)"),
+        keymap.of([indentWithTab]),
+        EditorView.updateListener.of((update) => {
+          if (!update.docChanged) {
+            return;
+          }
+
+          const found = this.findAction(id);
+
+          if (!found) {
+            return;
+          }
+
+          const actions = this.steps[found.index].actions;
+
+          if (actions) {
+            actions[found.which] = {
+              ...actions[found.which],
+              do: { code: update.state.doc.toString() },
+            };
+          }
+
+          this.changed();
+        }),
+      ],
+    });
+
+    this.codeViews.set(id, view);
+
+    return view.dom;
+  }
+
+  /** Where an action lives right now, by its stable id. */
+  private findAction(id: string): { index: number; which: number } | null {
+    for (let index = 0; index < this.steps.length; index += 1) {
+      const which = (this.steps[index].actions ?? []).findIndex((a) => a.id === id);
+
+      if (which !== -1) {
+        return { index, which };
+      }
+    }
+
+    return null;
+  }
+
+  /** Destroy the CodeMirror instances for actions that no longer exist. */
+  private pruneCodeViews() {
+    const alive = new Set<string>();
+
+    for (const step of this.steps) {
+      for (const action of step.actions ?? []) {
+        if (action.do && isCode(action.do)) {
+          alive.add(action.id);
+        }
+      }
+    }
+
+    for (const [id, view] of this.codeViews) {
+      if (!alive.has(id)) {
+        view.destroy();
+        this.codeViews.delete(id);
+      }
+    }
   }
 
   private addAction(index: number) {

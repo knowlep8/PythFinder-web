@@ -14,6 +14,24 @@ export interface MotorCommand {
   angle?: number;
 }
 
+/**
+ * Free-form Python for a parallel action, with `core` in scope.
+ *
+ * For whatever the motor picker cannot say -- reading a sensor, counting
+ * something, moving two motors from one action. `build_run` checks it parses
+ * with `compile()` and warns on obviously blocking calls; neither can prove
+ * it runs, because that needs a hub. See docs/web-planner.md, step 3.3.
+ */
+export interface CodeCommand {
+  code: string;
+}
+
+export type ActionBody = MotorCommand | CodeCommand;
+
+export function isCode(body: ActionBody): body is CodeCommand {
+  return "code" in body;
+}
+
 export interface RunAction {
   id: string;
   /**
@@ -24,7 +42,7 @@ export interface RunAction {
    * the robot comes to rest, and build_run works out when that is.
    */
   at?: { cm?: number; ms?: number };
-  do?: MotorCommand;
+  do?: ActionBody;
   label?: string;
 }
 

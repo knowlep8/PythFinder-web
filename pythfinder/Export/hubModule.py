@@ -114,6 +114,25 @@ def _call_for(action: dict) -> str:
         motor, call, speed, angle if angle is not None else 0, blocking)
 
 
+def _code_lines(code) -> list:
+    """A team member's own code, indented under the action's def.
+
+    Relative indentation inside their code is kept exactly as written -- an
+    if/else block still nests correctly -- only the base 4 spaces of the
+    function body is added on top. Blank lines stay blank rather than
+    picking up trailing whitespace, which some editors treat as a diff.
+
+    A function body cannot be empty, so unwritten code becomes a `pass` --
+    the same allowance _actions_source already makes for an unplugged motor.
+    """
+    text = str(code or "").strip("\n")
+
+    if not text.strip():
+        return ["    pass        # nothing written yet"]
+
+    return ["    " + line if line.strip() else "" for line in text.split("\n")]
+
+
 def _actions_source(actions: list) -> str:
     """The action functions, and the tuple that binds them in firing order."""
     if not actions:
@@ -127,7 +146,12 @@ def _actions_source(actions: list) -> str:
         lines.append("def _action_{0}(core):".format(number))
         lines.append('    """{0}"""'.format(label))
 
-        if action.get("motor") is None:
+        if action.get("code") is not None:
+            # the team's own code: nothing to guard, since it may reach any
+            # motor, several, or none -- that is their responsibility, same
+            # as anywhere else in a function body
+            lines.extend(_code_lines(action["code"]))
+        elif action.get("motor") is None:
             lines.append("    pass        # nothing bound to this one yet")
         else:
             # guard: an attachment that is not plugged in is None on the hub

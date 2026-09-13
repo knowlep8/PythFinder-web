@@ -172,6 +172,8 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
             into_line = 0.0
 
         for action in step.get("actions", []):
+            _check_code(action, index, diagnostics)
+
             at = _at_within_step(action.get("at"), step, into_wait, into_line)
 
             if _add_action(builder, dict(action, at = at), index, diagnostics):
@@ -326,6 +328,78 @@ def _add_step(builder: TrajectoryBuilder, step: dict, index: int, diagnostics: l
             "this step is missing something, or has the wrong kind of value: {0}"
                 .format(problem),
             step = index))
+
+
+def _code_problems(code: str) -> list:
+    """Simple, readable checks for code that would block the whole robot.
+
+    Not real analysis -- substring checks, same as the plan asks for. A
+    parallel action's code runs on the follow loop itself, which has no
+    threading: anything that blocks here stalls driving, not just whatever
+    the action was meant to do.
+    """
+    problems = []
+
+    if "wait(" in code:
+        problems.append((
+            "this action's code calls wait(), which blocks the whole robot "
+            "while it runs",
+            "remove it, or use a sequential 'Move arm' step instead"))
+
+    if "while" in code:
+        problems.append((
+            "this action's code contains a while loop, which can block the "
+            "whole robot",
+            "remove it, or use a sequential 'Move arm' step instead"))
+
+    # run_angle and run_target both wait by default -- see _call_for in
+    # hubModule.py, "the ones that finish". The plan names only run_angle;
+    # run_target is the same class of call for the same reason.
+    for call in ("run_angle(", "run_target("):
+        if call in code and "wait=False" not in code:
+            problems.append((
+                "this action's code calls {0}() without wait=False, which "
+                "blocks the whole robot".format(call[:-1]),
+                "add wait=False, or use a sequential 'Move arm' step instead"))
+
+    return problems
+
+
+def _check_code(action: dict, index: int, diagnostics: list):
+    """Syntax-check a custom action's code, and warn on obvious blocking.
+
+    `compile()` only proves the code parses -- it cannot run on a hub that
+    is not there, so it cannot know whether the names it calls exist, or
+    what the robot actually does. A stub proves what code says, never what
+    the platform has; see step 3.1 for the fuller version of this lesson.
+
+    A blank action is not an error: it is one mid-way through being typed,
+    the same allowance an unfinished arm step gets. _actions_source in
+    hubModule.py turns it into a plain `pass`.
+    """
+    do = action.get("do")
+
+    if not isinstance(do, dict) or "code" not in do:
+        return
+
+    code = str(do.get("code") or "")
+
+    if not code.strip():
+        return
+
+    try:
+        compile(code, "<action>", "exec")
+    except SyntaxError as problem:
+        diagnostics.append(Diagnostic.error(
+            "this action's code will not run: {0}".format(problem.msg),
+            step = index,
+            suggestion = ("check the Python -- line {0}".format(problem.lineno)
+                         if problem.lineno else None)))
+        return   # a syntax error makes the blocking check unreliable
+
+    for message, suggestion in _code_problems(code):
+        diagnostics.append(Diagnostic.warning(message, step = index,
+                                              suggestion = suggestion))
 
 
 def _add_action(builder: TrajectoryBuilder, action: dict, index: int,

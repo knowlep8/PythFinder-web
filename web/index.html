@@ -102,6 +102,7 @@
       .action {
         flex-basis: 100%;
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: 6px;
         margin: 5px 0 0 22px;
@@ -113,6 +114,15 @@
          clip to "start turn:", which reads as a different instruction */
       .action select { max-width: 150px; }
       .action input[type="number"] { width: 56px; }
+
+      /* a code action's editor drops to its own line rather than fight the
+         kind picker and the "at" field for space on narrow screens */
+      .action .cm-editor {
+        flex-basis: 100%;
+        margin-top: 4px;
+        max-height: 160px;
+        overflow-y: auto;
+      }
 
       .addaction {
         flex-basis: 100%;
