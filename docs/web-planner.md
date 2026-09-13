@@ -971,24 +971,62 @@ working, correctly ordered marker functions.
   With both gates and the tolerance in place: **101 tests pass**, the six new
   boundary cases among them, and the goldens and hub module are untouched.
 
-  **Still to fix: an action on a merged step fires in the step before it.**
-  Found while measuring the boundary, pinned in `test_merged_step_actions.py`
-  as xfail rather than patched, because it wants its own tests-first pass:
+  **Fixed: an action on a merged step fired in the step before it.** Found
+  while measuring the boundary, pinned as failing tests first, then fixed:
 
       cm: 15 on the second of two 30cm drives  ->  1042ms
       cm: 30 on the second of two 30cm drives  ->  1584ms
       cm: 30 on a single 60cm drive            ->  1584ms
 
-  The last two being identical is the whole bug. Consecutive drives merge into
-  one profile, and a distance-based action on the *second* drive is measured
-  from the start of that profile rather than from where its own step begins.
-  The second step spans `(3167, 3167)`, so every action attached to it fires
-  during the first — up to three seconds early, with no diagnostic at all.
+  The last two being identical was the whole bug. Consecutive drives merge into
+  one profile, and a distance-based action on the *second* drive was measured
+  from the start of that profile rather than from where its own step begins, so
+  every action attached to it fired during the first — up to three seconds
+  early, with no diagnostic at all.
 
-  It is worse for a team than the drop it was found next to. A dropped action
+  It was worse for a team than the drop it was found next to. A dropped action
   produces an arm that does not move, which is at least obviously broken; this
-  produces an arm that moves confidently at the wrong place on the mat, from a
-  file that looks correct.
+  produced an arm that moved confidently at the wrong place on the mat, from a
+  file that looked correct.
+
+  **The cause was one thing wearing three faces.** `segment_owner` records only
+  the step that *created* a segment, so a merged step's marker was placed
+  against a segment belonging to the step before it. Three symptoms, one fix:
+
+  - a parallel action on a merged **drive** fired in the drive before;
+  - three merged drives put all three actions on the same instant, and they
+    came back `c, b, a` — the hub would have bound them backwards;
+  - an **explicit** action on an arm step fired inside the previous arm step,
+    because `into_wait` reached only the arm step's own implicit marker.
+
+  `_at_within_step` now moves every action alike from "into this step" to "into
+  this segment", accumulating centimetres across merged drives and milliseconds
+  across merged waits, resetting wherever the builder starts a new segment.
+  Negative offsets are resolved against the step's own length rather than left
+  to the builder, which knows only the segment.
+
+  Checked against an independent reference — two 30cm drives versus one 60cm
+  drive, which must agree exactly:
+
+      cm: 0   -> 1584 = 60cm@30      cm: -5  -> 2566 = 60cm@55
+      cm: 15  -> 2125 = 60cm@45      cm: -30 -> 1584 = 60cm@30
+      cm: 30  -> 3167 = 60cm@60      three drives -> 1, 1223, 1945 in order
+
+  **One form is deliberately not covered**, pinned as xfail: a *time* offset
+  into a merged drive. `cm` on a drive and `ms` on a wait are lengths the step
+  itself declares; when the second of two merged drives "begins" in one
+  acceleration profile is not knowable until the trajectory is built. The
+  planner only ever creates `cm` actions, so it is unreachable today — the test
+  is there for whoever adds a time field to the action row.
+
+  **Arm steps back to back were already right**, which the team will lean on:
+  arm down then arm up gives `MARKERS = (1702, 1882)`, two distinct
+  `run_angle(..., wait=True)` calls bound in order. Worth knowing why the
+  timeline still looks odd there: `_step_times` hands each merged arm step a
+  notional slice, so the second reports `(2060, 2240)` while its marker fires
+  at 1882 inside the shared wait segment. The markers are right; only the
+  reported window differs, and `main.ts:122` will not highlight a step whose
+  window is a single instant, so playback never points at the wrong one.
 
   **A turn covers no distance, so a cm-based action on one is meaningless.**
   I predicted its states would share a single displacement, making

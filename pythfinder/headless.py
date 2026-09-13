@@ -135,34 +135,44 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
     action_steps = {}
     action_code = {}
 
-    # How far into the current run of merged waits we are.
+    # How far into the current run of merged steps we are: milliseconds for
+    # waits, centimetres for drives.
     #
-    # Consecutive waits become one segment, and arm steps are waits -- so two
-    # arm steps in a row share a segment. Left at the start of it, both actions
-    # would fire on the same millisecond: the arm told to do two things at
-    # once, and the generated file binding them in whichever order they came
-    # out. Each arm step therefore starts where the previous one finished.
+    # Merging is right for the motion and wrong for what is attached to it.
+    # Consecutive waits become one segment, and arm steps are waits, so two arm
+    # steps in a row share one; consecutive drives in the same direction become
+    # a single acceleration profile. A marker is placed relative to the
+    # *segment*, which belongs to whichever step created it -- so without these,
+    # "at the start of this step" means the start of the step before it.
+    #
+    # Left uncorrected it is the worse kind of wrong. Both arm steps fire on the
+    # same millisecond, the arm told to do two things at once. An action on the
+    # second of two drives fires up to three seconds early, with no diagnostic
+    # at all: the file downloads, looks right, and moves the arm confidently at
+    # the wrong place on the mat.
     into_wait = 0
+    into_line = 0.0
 
     for index, step in enumerate(steps):
         kind = step.get("type")
-        merging = kind in ("wait", "armStep")
 
-        if not merging:
+        if kind not in ("wait", "armStep"):
             into_wait = 0
+
+        if kind != "drive":
+            into_line = 0.0
 
         _add_step(builder, step, index, diagnostics)
 
         while len(segment_owner) < len(builder.segments):
             segment_owner.append(index)
-            into_wait = 0          # a new segment: offsets start again
+
+            # a new segment: this step begins it, so offsets start again
+            into_wait = 0
+            into_line = 0.0
 
         for action in step.get("actions", []):
-            at = action.get("at")
-
-            if kind == "armStep" and at is None:
-                # its own step: the arm starts as the robot comes to rest
-                at = {"ms": into_wait + 1}
+            at = _at_within_step(action.get("at"), step, into_wait, into_line)
 
             if _add_action(builder, dict(action, at = at), index, diagnostics):
                 action_steps[action.get("id")] = index
@@ -172,8 +182,8 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
                 elif kind == "armStep":
                     action_code[action.get("id")] = _arm_command(step)
 
-        if kind == "armStep":
-            into_wait += arm_step_ms(step)
+        into_wait += _step_own_ms(step)
+        into_line += _step_own_cm(step)
 
     trajectory = builder.build()
 
@@ -205,6 +215,75 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
                         for marker in trajectory.MARKERS],
             "diagnostics": [problem.as_dict() for problem in diagnostics],
             "module_text": module_text}
+
+
+def _step_own_ms(step: dict) -> int:
+    """How much time this step adds to a run of merged waits. 0 if it is not one."""
+    kind = step.get("type")
+
+    if kind == "armStep":
+        return arm_step_ms(step)
+
+    if kind == "wait":
+        try:
+            return int(step["ms"])
+        except (KeyError, TypeError, ValueError):
+            return 0
+
+    return 0
+
+
+def _step_own_cm(step: dict) -> float:
+    """How much distance this step adds to a merged drive. 0 if it is not one.
+
+    Always positive: displacement along the path grows whichever way the robot
+    faces, and a reversed drive starts a new segment anyway -- the builder only
+    combines drives whose signs match.
+    """
+    if step.get("type") != "drive":
+        return 0.0
+
+    try:
+        return abs(float(step["cm"]))
+    except (KeyError, TypeError, ValueError):
+        return 0.0
+
+
+def _at_within_step(at, step: dict, into_wait: int, into_line: float):
+    """Move an action's placement from "into this step" to "into this segment".
+
+    Steps merge; markers do not know it. Everything here is the difference
+    between the two, and it applies to every action alike -- an earlier version
+    offset only the arm step's own implicit marker, which left an explicit one
+    on the same step firing inside the step before it.
+
+    A negative value counts back from the end of *this* step, not the merged
+    segment's, so it is resolved here against the step's own length rather than
+    left to the builder, which knows only the segment.
+    """
+    kind = step.get("type")
+
+    if at is None:
+        if kind != "armStep":
+            return at
+
+        # its own step: the arm starts as the robot comes to rest. The +1 keeps
+        # it just inside the segment, and the goldens pin these times.
+        return {"ms": into_wait + 1}
+
+    if "cm" in at and kind == "drive":
+        value = float(at["cm"])
+        within = _step_own_cm(step) + value if value < 0 else value
+
+        return dict(at, cm = into_line + within)
+
+    if "ms" in at and kind in ("wait", "armStep"):
+        value = int(at["ms"])
+        within = _step_own_ms(step) + value if value < 0 else value
+
+        return dict(at, ms = into_wait + within)
+
+    return at
 
 
 def _add_step(builder: TrajectoryBuilder, step: dict, index: int, diagnostics: list):
