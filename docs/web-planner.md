@@ -807,6 +807,32 @@ working, correctly ordered marker functions.
   is an estimate wherever a sequential step appears. The robot genuinely waits
   either way; only the prediction is approximate, and it should say so.
 
+  **The Python half is done.** `armStep` becomes a wait segment sized by
+  `angle / speed`, with its action at the moment the robot comes to rest;
+  `hubModule` now emits `_action_N(core)` functions and a `run(core)` binding
+  them in firing order, each guarded against an attachment that is not plugged
+  in. 91 tests pass, seven of them written before the feature.
+
+  **Two faults the tests-first order caught, both invisible otherwise:**
+
+  - **Consecutive arm steps fired together.** They merge into one wait segment,
+    so both actions landed on the same millisecond and were bound in whichever
+    order they came out — the arm told to do two things at once, in the one
+    step type whose entire purpose is that one follows the other. Each now
+    starts where the previous finished.
+  - **The merged second step reported zero length**, which tells a team member
+    that a step the robot genuinely waits for is free. Merged *drives* still
+    report no time of their own — two drives really are one acceleration
+    profile — but merged arm steps take their own share.
+
+  **The golden had to be split, not rewritten.** The template run has actions,
+  so its module now carries code the hub fixture predates. The data is still
+  compared against that fixture line for line — those are the numbers the robot
+  drove — and the code section is asserted separately. (My first attempt at
+  splitting cut the file at the first `def` or `from`, which truncated the
+  generated module to its docstring, because the import sits directly under it.
+  The constants are picked out by name now.)
+
 - [ ] **3.2 Action blocks.** Attach to a step at "X cm in", "X ms in", or
   "X before the end" (negative values, as the builder already supports).
   Offered blocks only use non-blocking calls, because markers run inline on the
