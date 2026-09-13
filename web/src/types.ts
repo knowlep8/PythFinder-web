@@ -60,6 +60,28 @@ export type StepType =
    */
   | "armStep";
 
+/**
+ * A slow, careful section within one step -- step 4.5.
+ *
+ * Both `from` and `to` are placed the same way an action's `at` is: a
+ * distance into the step, or a time, negative counting back from the end.
+ * They must agree on which -- both `cm`, or both `ms` -- because comparing a
+ * distance to a time needs the trajectory built first, and this has to be
+ * checked before that happens.
+ *
+ * Setting a limit changes the robot's planned speed ceiling from where it
+ * starts *for the rest of the run*, with no automatic reset -- so `to` is
+ * not decoration, it is the marker that hands normal speed back. Leave it
+ * off, or place it wrong, and the robot stays slow for everything after.
+ */
+export interface SpeedLimit {
+  id: string;
+  from: { cm?: number; ms?: number };
+  to: { cm?: number; ms?: number };
+  /** the ceiling while the limit is in effect, in cm/s */
+  cm_s: number;
+}
+
 export interface RunStep {
   type: StepType;
   cm?: number;
@@ -77,6 +99,8 @@ export interface RunStep {
   angle?: number;
 
   actions?: RunAction[];
+  /** drive / toPoint / toPose only -- turning uses angular speed, not this */
+  speedLimits?: SpeedLimit[];
 }
 
 export interface RobotNumbers {

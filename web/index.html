@@ -132,6 +132,12 @@
       }
       .addaction button { font-size: 12px; padding: 2px 6px; }
 
+      /* step 4.5: the same warning-amber the .problem.warning text already
+         uses, so a slow section reads as "caution" against the motor and
+         code actions' cyan without a new colour to learn */
+      .action.speedlimit { border-left-color: #ffca7a; }
+      .action.speedlimit input[type="number"] { width: 48px; }
+
       .estimate { color: #6b7280; font-style: italic; }
 
       .step label { display: inline-flex; align-items: center; gap: 3px; color: #8a8f98; }

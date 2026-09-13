@@ -1270,7 +1270,69 @@ Order these after watching the kids use phase 3.
 - [ ] **4.3** Launch-area presets and snapping for the start pose.
 - [ ] **4.4** Overlay several runs at once, to check they do not collide with
   each other's missions.
-- [ ] **4.5** Speed-limit (constraints marker) blocks for slow, careful sections.
+- [x] **4.5** Speed-limit (constraints marker) blocks for slow, careful
+  sections. *Pulled ahead of 4.1-4.4 — a mission this year needs the robot to
+  slow down to complete it correctly.*
+
+  The library already had this — `addRelativeDisplacementConstraints`, proven
+  by the `constraints_marker` golden — it had just never been reachable from
+  a described run. **Checked before building anything:** setting a constraint
+  changes the robot's planned speed ceiling from that point *forward for the
+  rest of the run*, with no automatic reset
+  (`__process_relative_constraints`, `self.CONSTRAINTS = the_chosen_one.
+  constraints`). A "speed limit" is therefore always two markers wearing one
+  name — one that slows down where it starts, one that restores normal speed
+  where it ends. Asked which shape the block should have before writing any
+  of it: within one step, both ends on the same block, rather than two
+  independent markers a team member has to keep paired up across steps
+  themselves. Both markers are placed through the exact `_at_within_step`
+  every action already uses, so a limit on a merged step lands exactly where
+  3.2 already proved an action does — checked directly, by comparing a limit
+  on the second of two merged drives against the same limit on one drive of
+  the combined length: identical `total_ms`.
+
+  Offered only on `drive` / `toPoint` / `toPose`, not `turn`: a limit touches
+  *linear* speed only, and a turn moves the robot with angular speed alone —
+  offered there, it would look like it did something and silently not.
+
+  **A wording bug in shared library code, found by asking what a kid would
+  see, fixed before it shipped rather than after.** The diagnostic for a
+  marker landing outside its segment has always said "an action ... was
+  dropped", because until now every marker reaching it *was* one. Reading
+  that fresh with a speed limit in mind — "an action 200cm into this step was
+  dropped" when nothing on screen is called an action — `__report_marker_
+  not_in_segment` and the negative-offset path both now say what the marker
+  actually is: "a speed limit", "an interrupt", "an action", chosen by
+  `isinstance`. Confirmed against the live wheel, not just reasoned about:
+  set a limit's end past its step's length in the browser and read back
+  *"a speed limit 200.0cm into this step was dropped, because the step only
+  goes as far as 75.0cm — try: put it before 75.0cm, or make the step
+  longer."* No golden or test pinned the old wording, and the full suite
+  stayed green through the change.
+
+  **The chain view (3.4) needed a small addition, not a workaround.** Every
+  other marker's chain-text line is a `print()` stand-in, because the desktop
+  simulator has no motors to call for real code to reach. A constraint is
+  different: `addRelativeDisplacementConstraints(...)` is not simulator-only,
+  so the chain carries the *actual* call, unmodified — proved by executing
+  the emitted chain through the real `TrajectoryBuilder` and checking its
+  `total_ms` against `build_run`'s own, the same anti-drift discipline 3.4
+  established. The one complication: `fll_run_template.py` does not import
+  `Constraints`/`Constraints2D`, so a chain that uses them now opens with
+  `# needs: from pythfinder import Constraints, Constraints2D` rather than
+  leaving a pasted `NameError` to explain itself.
+
+  Checked live in the browser: a dramatic limit (5 cm/s across most of a
+  75cm drive) took the step from 3.7s to 13.4s and the whole run from 15.7s
+  to 25.3s: the ANSWER visibly changes, not just the number in a diagnostic.
+  A modest limit (20 cm/s over 10cm) changed `total_ms` by exactly 39ms,
+  correctly invisible at the UI's one-decimal-second display — checked in
+  Python first so an unchanged-looking screen was known to be right, not
+  mistaken for the feature doing nothing.
+
+  17 new tests (`test_speed_limits.py`), including the merged-step and
+  chain-execution checks above; 146 pass in total, the one known xfail
+  unchanged.
 - [ ] **4.6** Hub memory budget: total bytes across all runs in the selector.
 - [ ] **4.7** *(stretch)* Send straight to the hub over Web Bluetooth, the way
   code.pybricks.com does. Needs the secure context from 2.1.

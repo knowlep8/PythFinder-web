@@ -21,7 +21,14 @@ import { python } from "@codemirror/lang-python";
 import { keymap, placeholder, EditorView } from "@codemirror/view";
 import { minimalSetup } from "codemirror";
 
-import type { ActionBody, BuiltStep, Diagnostic, RunStep, StepType } from "./types";
+import type {
+  ActionBody,
+  BuiltStep,
+  Diagnostic,
+  RunStep,
+  SpeedLimit,
+  StepType,
+} from "./types";
 import { isCode } from "./types";
 
 export interface RunEditorHandlers {
@@ -179,6 +186,18 @@ function newActionId(): string {
 /** Steps a parallel action can ride along with: the ones that move. */
 function canCarryActions(type: StepType): boolean {
   return type !== "armStep" && type !== "wait";
+}
+
+/**
+ * Steps a speed limit makes sense on -- step 4.5.
+ *
+ * Narrower than canCarryActions: a limit only ever touches *linear* speed,
+ * so it has nothing to do on a turn, which moves the robot with angular
+ * speed alone. Offered there, it would look like it did something and
+ * silently not.
+ */
+function canCarrySpeedLimit(type: StepType): boolean {
+  return type === "drive" || type === "toPoint" || type === "toPose";
 }
 
 export class RunEditor {
@@ -518,7 +537,91 @@ export class RunEditor {
       row.append(add);
     }
 
+    // A limit only touches linear speed, so it is offered on fewer steps
+    // than a parallel action -- see canCarrySpeedLimit.
+    if (canCarrySpeedLimit(step.type)) {
+      (step.speedLimits ?? []).forEach((_, which) => {
+        row.append(this.renderSpeedLimit(index, which));
+      });
+
+      const add = document.createElement("div");
+      add.className = "addaction";
+      add.append(
+        this.button("+ speed limit", "slow down for part of this move", () =>
+          this.addSpeedLimit(index),
+        ),
+      );
+      row.append(add);
+    }
+
     return row;
+  }
+
+  /** A slow, careful section within this step -- step 4.5. */
+  private renderSpeedLimit(index: number, which: number): HTMLElement {
+    const limit = (this.steps[index].speedLimits ?? [])[which];
+
+    const line = document.createElement("div");
+    line.className = "action speedlimit";
+
+    line.append(document.createTextNode("↳ slow to"));
+
+    line.append(
+      this.number(String(limit.cm_s), "cm/s", 5, (value) => {
+        this.setSpeedLimit(index, which, { cm_s: value });
+      }),
+    );
+
+    line.append(document.createTextNode("from"));
+    line.append(
+      this.number(String(limit.from.cm ?? 0), "cm in", 1, (value) => {
+        this.setSpeedLimit(index, which, { from: { cm: value } });
+      }),
+    );
+
+    line.append(document.createTextNode("to"));
+    line.append(
+      this.number(String(limit.to.cm ?? 0), "cm in", 1, (value) => {
+        this.setSpeedLimit(index, which, { to: { cm: value } });
+      }),
+    );
+
+    line.append(
+      this.button("✕", "remove this speed limit", () => this.removeSpeedLimit(index, which)),
+    );
+
+    return line;
+  }
+
+  private setSpeedLimit(index: number, which: number, change: Partial<SpeedLimit>) {
+    const limits = this.steps[index].speedLimits;
+
+    if (!limits) {
+      return;
+    }
+
+    limits[which] = { ...limits[which], ...change };
+    this.changed();
+  }
+
+  private addSpeedLimit(index: number) {
+    const step = this.steps[index];
+
+    step.speedLimits = [
+      ...(step.speedLimits ?? []),
+      { id: newActionId(), from: { cm: 0 }, to: { cm: 10 }, cm_s: 20 },
+    ];
+
+    this.render();
+    this.changed();
+  }
+
+  private removeSpeedLimit(index: number, which: number) {
+    const step = this.steps[index];
+    step.speedLimits = (step.speedLimits ?? []).filter((_, at) => at !== which);
+
+    this.render();
+    this.changed();
   }
 
   /** One thing that happens while this step is running. */

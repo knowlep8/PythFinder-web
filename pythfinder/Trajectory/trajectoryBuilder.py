@@ -472,9 +472,9 @@ class TrajectoryBuilder():
                     remove.append(i)                 # else remove marker, because it's impossible
 
                     self.__report(Diagnostic.warning(
-                        "an action {0}cm from the end of this step was dropped, "
-                        "because that is {1}cm before the step begins"
-                        .format(abs(marker.displacement),
+                        "{0} {1}cm from the end of this step was dropped, "
+                        "because that is {2}cm before the step begins"
+                        .format(self.__marker_phrase(marker), abs(marker.displacement),
                                 round(segment.states[0].displacement - positive, 2)),
                         step = self.__step,
                         suggestion = "count back a smaller distance, or make the step longer"))
@@ -741,6 +741,22 @@ class TrajectoryBuilder():
         if self.print_diagnostics:
             print("\n\n{0}".format(diagnostic))
 
+    def __marker_phrase(self, marker: Marker) -> str:
+        """What to call a dropped marker, in words a team member chose.
+
+        A constraints marker is a speed limit and an interrupt is, well, an
+        interrupt -- to a kid neither is "an action", which is what these
+        messages called every marker before step 4.5 made a constraints
+        marker something the browser could actually produce.
+        """
+        if isinstance(marker, ConstraintsMarker):
+            return "a speed limit"
+
+        if isinstance(marker, InterruptMarker):
+            return "an interrupt"
+
+        return "an action"
+
     def __report_marker_not_in_segment(self, marker: Marker, segment: MotionSegment):
         if marker.time is not None:
             asked_for = "{0}ms".format(marker.time)
@@ -750,10 +766,10 @@ class TrajectoryBuilder():
             as_long_as = "{0}cm".format(round(segment.states[-1].displacement - segment.states[0].displacement, 2))
 
         self.__report(Diagnostic.warning(
-            "an action {0} into this step was dropped, because the step only "
-            "goes as far as {1}".format(asked_for, as_long_as),
+            "{0} {1} into this step was dropped, because the step only "
+            "goes as far as {2}".format(self.__marker_phrase(marker), asked_for, as_long_as),
             step = self.__step,
-            suggestion = "put the action before {0}, or make the step longer"
+            suggestion = "put it before {0}, or make the step longer"
                          .format(as_long_as)))
 
     def __report_marker_not_in_trajectory(self, marker: Marker):

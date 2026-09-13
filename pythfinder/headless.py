@@ -155,6 +155,11 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
     into_wait = 0
     into_line = 0.0
 
+    # Step 4.5: whether the chain needs to say Constraints/Constraints2D are
+    # not among fll_run_template.py's own imports -- only worth the note when
+    # a speed limit actually placed one.
+    used_speed_limits = False
+
     # Step 3.4's desktop-tool view, one entry per described step: its own
     # .method(...) line, then one further-indented marker line per action.
     # Built in this same loop rather than a second pass over `steps`, so it
@@ -200,12 +205,19 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
             if marker_line is not None:
                 block.append("    " + marker_line)
 
+        for limit in step.get("speedLimits", []):
+            chain_lines = _add_speed_limit(builder, step, limit, index, diagnostics,
+                                           robot.constraints, into_wait, into_line)
+            block.extend("    " + line for line in chain_lines)
+            used_speed_limits = used_speed_limits or bool(chain_lines)
+
         chain_blocks.append(block)
 
         into_wait += _step_own_ms(step)
         into_line += _step_own_cm(step)
 
-    builder_source = _builder_chain_text(run.get("start") or {}, chain_blocks)
+    builder_source = _builder_chain_text(run.get("start") or {}, chain_blocks,
+                                         used_speed_limits)
 
     trajectory = builder.build()
 
@@ -554,7 +566,7 @@ def _chain_marker_line(action: dict, at) -> str:
     return None
 
 
-def _builder_chain_text(start: dict, blocks: list) -> str:
+def _builder_chain_text(start: dict, blocks: list, needs_constraints: bool = False) -> str:
     """The desktop tool's own idiom, built from this run -- step 3.4.
 
     For pasting into fll_run_template.py's build(sim), replacing "EDIT ME 2".
@@ -563,19 +575,143 @@ def _builder_chain_text(start: dict, blocks: list) -> str:
     to run in the simulator, not headlessly. The pose is written out in full
     rather than naming START_POSE, so pasting this is correct even when the
     file's own START_POSE is something else.
+
+    needs_constraints (step 4.5): a speed limit's Constraints2D/Constraints
+    calls are real, not a print() stand-in -- unlike an action, there is
+    nothing about them that only makes sense in the simulator, so they are
+    the actual code, verbatim. But fll_run_template.py's own imports do not
+    include them (`from pythfinder import Pose, TrajectoryBuilder`), so a
+    leading note says what to add rather than leaving a pasted NameError to
+    explain itself.
     """
     pose = start or {}
     preamble = "(TrajectoryBuilder(sim, Pose({0}, {1}, {2}), FLL_FIELD)".format(
         pose.get("x", 0), pose.get("y", 0), pose.get("head", 0))
 
+    note = (
+        "# needs: from pythfinder import Constraints, Constraints2D\n"
+        if needs_constraints else ""
+    )
+
     if not blocks:
-        return preamble + "\n\n        .build())\n"
+        return note + preamble + "\n\n        .build())\n"
 
     body = "\n\n".join(
         "\n".join("        " + line for line in block)
         for block in blocks)
 
-    return preamble + "\n\n" + body + "\n\n        .build())\n"
+    return note + preamble + "\n\n" + body + "\n\n        .build())\n"
+
+
+def _speed_limit_key(at) -> str:
+    """"cm" or "ms", or None if `at` does not look like either."""
+    if not isinstance(at, dict):
+        return None
+
+    if "cm" in at:
+        return "cm"
+
+    if "ms" in at:
+        return "ms"
+
+    return None
+
+
+def _chain_speed_limit_lines(resolved_from: dict, resolved_to: dict, cm_s: float) -> list:
+    """The two real .addRelative...Constraints(...) calls a limit becomes.
+
+    Unlike an action's print() stand-in, these are the actual call the run
+    itself makes -- a constraint is not simulator-only, so there is nothing
+    to substitute. Constraints2D() bare restores the library's own defaults,
+    which is what a headless build's default robot already carries too (see
+    FLL_ROBOT's own constraints in robotConfig.py).
+    """
+    if "cm" in resolved_from:
+        call, start, end = "addRelativeDisplacementConstraints", resolved_from["cm"], resolved_to["cm"]
+    else:
+        call, start, end = "addRelativeTemporalConstraints", resolved_from["ms"], resolved_to["ms"]
+
+    return [
+        ".{0}({1}, Constraints2D(linear = Constraints(vel = {2})))".format(call, start, cm_s),
+        ".{0}({1}, Constraints2D())".format(call, end),
+    ]
+
+
+def _add_speed_limit(builder: TrajectoryBuilder, step: dict, spec: dict, index: int,
+                     diagnostics: list, normal_constraints: Constraints2D,
+                     into_wait: int, into_line: float) -> list:
+    """Place one slow-then-normal pair of constraints markers -- step 4.5.
+
+    Returns the chain lines the two markers become, or an empty list if the
+    limit could not be placed at all (an error was recorded instead).
+
+    Two markers, not one: setting a constraint changes the robot's planned
+    speed ceiling from that point *forward for the rest of the run*, with no
+    automatic reset (see __process_relative_constraints in
+    trajectoryBuilder.py, `self.CONSTRAINTS = the_chosen_one.constraints`).
+    A "speed limit" reads as a section with a start and an end, so it needs a
+    marker that slows down where it starts and one that restores the robot's
+    own normal speed where it ends -- both placed through the same
+    _at_within_step every action already uses, so a limit on a merged step
+    lands exactly where 3.2 already proved an action does.
+    """
+    kind = step.get("type")
+
+    if kind not in ("drive", "toPoint", "toPose"):
+        diagnostics.append(Diagnostic.error(
+            "a speed limit only makes sense on a step that drives somewhere",
+            step = index,
+            suggestion = "move it to a Drive, Go to point, or Go to pose step"))
+        return []
+
+    from_at = spec.get("from")
+    to_at = spec.get("to")
+    from_key = _speed_limit_key(from_at)
+    to_key = _speed_limit_key(to_at)
+
+    if from_key is None or to_key is None or from_key != to_key:
+        diagnostics.append(Diagnostic.error(
+            "a speed limit's start and end have to both be a distance into "
+            "the step, or both a time",
+            step = index,
+            suggestion = "use cm in for both, or ms for both"))
+        return []
+
+    try:
+        cm_s = float(spec["cm_s"])
+    except (KeyError, TypeError, ValueError):
+        diagnostics.append(Diagnostic.error(
+            "a speed limit needs a speed", step = index))
+        return []
+
+    if cm_s <= 0:
+        diagnostics.append(Diagnostic.error(
+            "a speed limit has to be a positive speed",
+            step = index,
+            suggestion = "pick a speed above 0 cm/s"))
+        return []
+
+    resolved_from = _at_within_step(from_at, step, into_wait, into_line)
+    resolved_to = _at_within_step(to_at, step, into_wait, into_line)
+
+    if resolved_from[from_key] >= resolved_to[to_key]:
+        diagnostics.append(Diagnostic.error(
+            "a speed limit has to end after it starts",
+            step = index,
+            suggestion = "move the end further into the step"))
+        return []
+
+    slow = normal_constraints.copy()
+    slow.linear.set(vel = cm_s)
+
+    if from_key == "cm":
+        builder.addRelativeDisplacementConstraints(resolved_from["cm"], slow)
+        builder.addRelativeDisplacementConstraints(resolved_to["cm"], normal_constraints.copy())
+    else:
+        builder.addRelativeTemporalConstraints(resolved_from["ms"], slow)
+        builder.addRelativeTemporalConstraints(resolved_to["ms"], normal_constraints.copy())
+
+    return _chain_speed_limit_lines(resolved_from, resolved_to, cm_s)
 
 
 def _hub_module_code(trajectory, name: str, steps_ms: int, actions: list = None):
