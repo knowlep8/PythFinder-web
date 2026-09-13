@@ -57,6 +57,11 @@ const saveButton = document.getElementById("save") as HTMLButtonElement;
 const costReadout = document.getElementById("cost") as HTMLElement;
 const nameProblemLine = document.getElementById("nameproblem") as HTMLElement;
 
+const codeView = document.getElementById("codeview") as HTMLElement;
+const chainView = document.getElementById("chainview") as HTMLElement;
+const copyCodeButton = document.getElementById("copycode") as HTMLButtonElement;
+const copyChainButton = document.getElementById("copychain") as HTMLButtonElement;
+
 const keepButton = document.getElementById("keep") as HTMLButtonElement;
 const savedList = document.getElementById("saved") as HTMLSelectElement;
 const forgetButton = document.getElementById("forget") as HTMLButtonElement;
@@ -310,6 +315,12 @@ async function main() {
     playback.setDuration(result.total_ms);
     showSaveState();
 
+    // step 3.4: read-only, so textContent is enough -- nothing here is typed into
+    codeView.textContent = result.code_text ?? "nothing to run yet";
+    chainView.textContent = result.builder_source ?? "nothing to run yet";
+    copyCodeButton.disabled = result.code_text === null;
+    copyChainButton.disabled = result.builder_source === null;
+
     const trouble = result.diagnostics.length;
 
     runReadout.textContent =
@@ -425,6 +436,35 @@ async function main() {
     saveModule(nameBox.value, module);
     log(`saved ${nameBox.value}.py — upload it at code.pybricks.com`);
   });
+
+  /**
+   * Copy a read-only view to the clipboard, step 3.4.
+   *
+   * The Clipboard API needs a secure context (https:, or 127.0.0.1 for
+   * local work) and can be refused outright -- neither is this page's fault,
+   * so the fallback is to select the text instead: still one paste away,
+   * just not zero-click.
+   */
+  async function copyView(view: HTMLElement, label: string) {
+    const text = view.textContent ?? "";
+
+    try {
+      await navigator.clipboard.writeText(text);
+      log(`copied the ${label} to the clipboard`);
+    } catch {
+      const range = document.createRange();
+      range.selectNodeContents(view);
+
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+
+      log(`could not reach the clipboard -- selected the ${label} instead, copy it with Ctrl/Cmd+C`);
+    }
+  }
+
+  copyCodeButton.addEventListener("click", () => copyView(codeView, "generated run()"));
+  copyChainButton.addEventListener("click", () => copyView(chainView, "TrajectoryBuilder chain"));
 
   playButton.addEventListener("click", () => playback.toggle());
 

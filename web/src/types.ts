@@ -140,4 +140,8 @@ export interface BuildResult {
   diagnostics: Diagnostic[];
   /** the .py file to download, or null when there is nothing to drive */
   module_text: string | null;
+  /** step 3.4: the same file, its DATA payload elided -- for reading, not saving */
+  code_text: string | null;
+  /** step 3.4: the equivalent TrajectoryBuilder chain, for the desktop tool */
+  builder_source: string | null;
 }

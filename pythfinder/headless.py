@@ -10,7 +10,9 @@ everything needed to draw it, complain about it, and download it:
       "poses": [ {"t": 0, "x": -46.0, "y": -83.0, "head": 0.0}, ... ],
       "markers": [ {"id": "a1", "step": 0, "time_ms": 1764}, ... ],
       "diagnostics": [ {"level": "warning", "message": ..., "step": 1, ...} ],
-      "module_text": "<the .py file to save and upload to the hub>"
+      "module_text": "<the .py file to save and upload to the hub>",
+      "code_text": "<the same file, its DATA payload elided -- for reading>",
+      "builder_source": "<the equivalent TrajectoryBuilder chain, for the desktop tool>"
     }
 
 Nothing here raises for a badly described run: a run a child typed wrong is
@@ -153,6 +155,13 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
     into_wait = 0
     into_line = 0.0
 
+    # Step 3.4's desktop-tool view, one entry per described step: its own
+    # .method(...) line, then one further-indented marker line per action.
+    # Built in this same loop rather than a second pass over `steps`, so it
+    # can only ever place a marker exactly where _add_action just did -- the
+    # `at` computed a line below is the one both of them use.
+    chain_blocks = []
+
     for index, step in enumerate(steps):
         kind = step.get("type")
 
@@ -171,6 +180,8 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
             into_wait = 0
             into_line = 0.0
 
+        block = [_chain_step_line(step)]
+
         for action in step.get("actions", []):
             _check_code(action, index, diagnostics)
 
@@ -184,8 +195,17 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
                 elif kind == "armStep":
                     action_code[action.get("id")] = _arm_command(step)
 
+            marker_line = _chain_marker_line(action, at)
+
+            if marker_line is not None:
+                block.append("    " + marker_line)
+
+        chain_blocks.append(block)
+
         into_wait += _step_own_ms(step)
         into_line += _step_own_cm(step)
+
+    builder_source = _builder_chain_text(run.get("start") or {}, chain_blocks)
 
     trajectory = builder.build()
 
@@ -203,6 +223,11 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
     module_text = _hub_module(trajectory, name, steps_ms, diagnostics,
                               firing_order)
 
+    # only when the real file built: nothing legitimate to elide the payload
+    # from otherwise, and _hub_module already recorded why
+    code_text = (_hub_module_code(trajectory, name, steps_ms, firing_order)
+                if module_text is not None else None)
+
     return {"version": VERSION,
             "name": name,
             "ok": not any(problem.is_error() for problem in diagnostics),
@@ -216,7 +241,12 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
                          "time_ms": marker.time}
                         for marker in trajectory.MARKERS],
             "diagnostics": [problem.as_dict() for problem in diagnostics],
-            "module_text": module_text}
+            "module_text": module_text,
+            # step 3.4: the same file with its payload elided, and the
+            # TrajectoryBuilder chain it is equivalent to -- both read-only,
+            # neither needed to drive the robot
+            "code_text": code_text,
+            "builder_source": builder_source}
 
 
 def _step_own_ms(step: dict) -> int:
@@ -447,6 +477,120 @@ def _arm_command(step: dict) -> dict:
             "wait": True}
 
 
+# Matches FINISHING_CALLS's own labels in runEditor.ts, so the wording an
+# arm step shows in the browser is the wording it shows in this comment.
+_ARM_CALL_WORDS = {
+    "run_angle": "turn by {angle}° at {speed}°/s",
+    "run_target": "turn to {angle}° at {speed}°/s",
+    "run_until_stalled": "run at {speed}°/s until it stops",
+}
+
+
+def _chain_step_line(step: dict) -> str:
+    """The .method(...) call this step becomes in the desktop-tool chain.
+
+    Named here and nowhere else: the *values* -- offsets, which segment a
+    marker lands in -- come from _at_within_step and the accumulators in
+    build_run's own loop, the same ones real placement uses. This only says
+    which TrajectoryBuilder method the step is.
+    """
+    kind = step.get("type")
+
+    if kind == "drive":
+        return ".inLineCM({0})".format(step.get("cm", 0))
+
+    if kind == "wait":
+        return ".wait({0})".format(step.get("ms", 0))
+
+    if kind == "armStep":
+        words = _ARM_CALL_WORDS.get(step.get("call", "run_angle"), "{call}").format(
+            call = step.get("call", "run_angle"),
+            angle = step.get("angle", 0),
+            speed = step.get("speed", 500))
+
+        # a step here, not a builder method of its own -- see _add_step
+        return ".wait({0})   # {1}: {2} (estimated)".format(
+            arm_step_ms(step), step.get("motor", "leftTask"), words)
+
+    reversed_arg = ", reversed = True)" if step.get("reversed") else ")"
+
+    if kind == "turn":
+        return ".turnToDeg({0}{1}".format(step.get("deg", 0), reversed_arg)
+
+    if kind == "toPoint":
+        return ".toPoint(Point({0}, {1}){2}".format(
+            step.get("x", 0), step.get("y", 0), reversed_arg)
+
+    if kind == "toPose":
+        return ".toPose(Pose({0}, {1}, {2}){3}".format(
+            step.get("x", 0), step.get("y", 0), step.get("head", 0), reversed_arg)
+
+    return "# '{0}' has no equivalent here".format(kind)
+
+
+def _chain_marker_line(action: dict, at) -> str:
+    """The .addRelative...Marker(...) call one action becomes, or None.
+
+    Every action becomes a print() of its own label, whichever kind of action
+    it is -- a motor picker or step 3.3's own code. fll_run_template.py says
+    up front that a marker only ever runs in the simulator, which has no
+    motors to call, so the real code has nowhere to go here; it lives in the
+    generated run() instead (see hub_module_code_text).
+    """
+    if not isinstance(at, dict):
+        return None
+
+    label = str(action.get("label") or action.get("id") or "action")
+    printed = label.replace("\\", "\\\\").replace('"', '\\"')
+
+    if "cm" in at:
+        return '.addRelativeDisplacementMarker({0}, lambda: print("{1}"))'.format(
+            at["cm"], printed)
+
+    if "ms" in at:
+        return '.addRelativeTemporalMarker({0}, lambda: print("{1}"))'.format(
+            at["ms"], printed)
+
+    return None
+
+
+def _builder_chain_text(start: dict, blocks: list) -> str:
+    """The desktop tool's own idiom, built from this run -- step 3.4.
+
+    For pasting into fll_run_template.py's build(sim), replacing "EDIT ME 2".
+    Uses the template's own call form, TrajectoryBuilder(sim, Pose, preset),
+    rather than the sim-free form build_run itself uses -- this text is meant
+    to run in the simulator, not headlessly. The pose is written out in full
+    rather than naming START_POSE, so pasting this is correct even when the
+    file's own START_POSE is something else.
+    """
+    pose = start or {}
+    preamble = "(TrajectoryBuilder(sim, Pose({0}, {1}, {2}), FLL_FIELD)".format(
+        pose.get("x", 0), pose.get("y", 0), pose.get("head", 0))
+
+    if not blocks:
+        return preamble + "\n\n        .build())\n"
+
+    body = "\n\n".join(
+        "\n".join("        " + line for line in block)
+        for block in blocks)
+
+    return preamble + "\n\n" + body + "\n\n        .build())\n"
+
+
+def _hub_module_code(trajectory, name: str, steps_ms: int, actions: list = None):
+    """The learning half of step 3.4 -- see hub_module_code_text."""
+    if trajectory.TIME <= 0:
+        return None
+
+    try:
+        return trajectory.hub_module_code(name, steps_ms, actions)
+
+    except ValueError:
+        # _hub_module already recorded the real diagnostic for this trajectory
+        return None
+
+
 def _described_step(segment_index, segment_owner):
     """Translate a builder segment number back into a described step number."""
     if segment_index is None:
@@ -565,4 +709,6 @@ def _nothing_to_drive(name: str, diagnostics: list) -> dict:
             "poses": [],
             "markers": [],
             "diagnostics": [problem.as_dict() for problem in diagnostics],
-            "module_text": None}
+            "module_text": None,
+            "code_text": None,
+            "builder_source": None}

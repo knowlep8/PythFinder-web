@@ -1164,9 +1164,55 @@ working, correctly ordered marker functions.
   `@codemirror/view`, `@codemirror/commands` — and about 110KB gzipped to the
   bundle (21KB before). Checked against the 13MB Pyodide runtime it rides
   alongside, not worth trimming.
-- [ ] **3.4 Python view.** Read-only panel showing the equivalent
-  `TrajectoryBuilder` chain and the generated `run()`. It is for learning, and
-  for pasting into the desktop tool.
+- [x] **3.4 Python view.** A collapsed `<details>` panel, "Python", below the
+  download button: two read-only boxes, each with its own Copy button.
+
+  **"The generated `run()`"** turned out to mean the download's own code, with
+  its payload elided — not a rewrite. `hub_module_text`'s assembly was split
+  into a shared `_module_text(heading, steps, markers, count, data_block,
+  actions)` that both the real export and this view call, differing only in
+  what `data_block` is: the real bytes, or one line saying how many states
+  were elided. Everything else — docstring, `STEPS`/`MARKERS`/`COUNT`, every
+  `_action_N`, `run()` itself — is the identical text, by construction, not by
+  care taken to keep two things in sync. `tests/test_python_view.py` checks
+  this directly: split both texts on `DATA = (`, and everything after must be
+  character-for-character the same.
+
+  **"The equivalent `TrajectoryBuilder` chain"** is new synthesis: one
+  `.method(...)` line per described step, matching `fll_run_template.py`'s own
+  idiom (`TrajectoryBuilder(sim, Pose(...), FLL_FIELD)` — the constructor form
+  "team scripts have always used", not `build_run`'s sim-free one) closely
+  enough to paste straight into that template's `build(sim)`, replacing "EDIT
+  ME 2". The pose is written out in full rather than naming `START_POSE`, so
+  pasting it is correct even when the file's own `START_POSE` is something
+  else. Every action becomes `lambda: print("<label>")`, whatever kind it is —
+  the template's own docstring says a marker only ever runs in the simulator,
+  which has no motors to call, so the real code has nowhere to go here; it is
+  the other panel.
+
+  **The offset arithmetic is shared, not re-derived.** `chain_blocks` is built
+  inside `build_run`'s own loop, using the exact `at` that `_at_within_step`
+  just computed for the real marker — not a second pass re-deriving offsets
+  from the step list, which would have been a second place for the 3.2 bug to
+  reappear once real code exists to paste it into. Proved rather than assumed:
+  `tests/test_python_view.py` takes the emitted chain, swaps its one
+  desktop-only line for the sim-free constructor, `exec()`s it through the
+  real `TrajectoryBuilder`, and checks the resulting trajectory's time and
+  marker times against `build_run`'s own numbers for the identical steps — on
+  the template run, on the merged-drive case 3.2 fixed, and on two arm steps
+  in a row. Only the method-name table (`_chain_step_line`) is a second
+  writing of anything, and it is the stable, rarely-touched half.
+
+  A quoted label (`the "big" arm`) becomes a Python string literal, so it has
+  to survive being one — escaped rather than trusted, and checked by actually
+  running the result rather than inspecting the escaped text.
+
+  Plain `<pre>`, not a second CodeMirror: the plan says *read-only*, and a
+  syntax-highlighted editor component earns nothing back for text nobody
+  types into. Framed to match 3.3's editor box so the two read as the same
+  kind of thing. Copy tries `navigator.clipboard.writeText` and falls back to
+  selecting the text when the Clipboard API is refused (no secure context, or
+  simply declined) — still one paste away, not a dead button.
 
 ---
 

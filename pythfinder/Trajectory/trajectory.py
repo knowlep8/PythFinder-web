@@ -5,7 +5,7 @@ from pythfinder.Trajectory.trajectoryGenerator import *
 from pythfinder.Trajectory.robotConfig import RobotConfig
 
 # safe to import at the top: the hub export needs nothing but struct
-from pythfinder.Export.hubModule import hub_module_text
+from pythfinder.Export.hubModule import hub_module_text, hub_module_code_text
 
 # A built trajectory: the motion states, the markers, and the robot they were
 # planned for.
@@ -53,6 +53,17 @@ class Trajectory():
         the attachment motor code and a run() of its own as well.
         """
         return hub_module_text(self.trajGenerator, name, steps, actions)
+
+    # step 3.4: the same file, minus the payload nobody can read either way
+    def hub_module_code(self, name: str = "trajectory", steps: int = 1,
+                        actions: list = None) -> str:
+        """The docstring, the constants, every action and run() -- no DATA.
+
+        For a read-only "what does this actually do" view. Built through the
+        same code as hub_module(), so it can never say something the real
+        file does not.
+        """
+        return hub_module_code_text(self.trajGenerator, name, steps, actions)
 
     # the text that would be written to the .txt, without writing it
     def text(self,

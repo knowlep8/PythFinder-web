@@ -199,6 +199,37 @@
         margin: 14px 0 0;
         color: #b9bec6;
       }
+
+      /* step 3.4: read-only code, so it gets the same framed-box language as
+         3.3's editor rather than sitting bare on the page like #log */
+      details#python summary {
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #8a8f98;
+      }
+      details#python h3 {
+        font-size: 12px;
+        font-weight: 600;
+        color: #8a8f98;
+        margin: 14px 0 0;
+      }
+      .pysub { color: #8a8f98; font-size: 12px; margin: 8px 0 0; }
+      .codehead { margin: 6px 0 0; }
+      .codehead button { font-size: 12px; padding: 2px 8px; }
+      pre.codeview {
+        font-size: 12px;
+        line-height: 1.5;
+        padding: 8px 10px;
+        margin: 4px 0 0;
+        background: #101214;
+        border: 1px solid #333a42;
+        border-radius: 4px;
+        max-height: 260px;
+        overflow-y: auto;
+      }
     </style>
   </head>
   <body>
@@ -241,6 +272,27 @@
           <span id="cost" class="cost">—</span>
         </div>
         <p id="nameproblem" class="problem error" hidden></p>
+
+        <details id="python" class="spaced">
+          <summary>Python</summary>
+          <p class="pysub">
+            Read-only. The code half of the file above, and the equivalent
+            <code>TrajectoryBuilder</code> chain for
+            <code>fll_run_template.py</code>'s own simulator.
+          </p>
+
+          <h3>The generated <code>run()</code></h3>
+          <div class="codehead">
+            <button id="copycode" type="button" title="copy to the clipboard">Copy</button>
+          </div>
+          <pre id="codeview" class="codeview">—</pre>
+
+          <h3>For the desktop tool</h3>
+          <div class="codehead">
+            <button id="copychain" type="button" title="copy to the clipboard">Copy</button>
+          </div>
+          <pre id="chainview" class="codeview">—</pre>
+        </details>
 
         <h2 class="spaced">Saved runs</h2>
         <div class="save">
