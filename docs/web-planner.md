@@ -771,6 +771,35 @@ working, correctly ordered marker functions.
   platform *lacks*. And a test fixture small enough to read is often too small
   to prove anything: four states passed every check here and was unobservable
   there.
+  **Two kinds of action block, decided with the team.** A run needs both, and
+  they are different things rather than two settings of one thing:
+
+  - **Parallel** — attached to a motion step, fires at a moment, the robot
+    keeps driving. This is what a marker already is. Only motor calls that
+    return at once may be offered: `run(speed)`, `stop()`.
+  - **Sequential** — its own step. The robot stops, the arm runs *to
+    completion*, and the next step begins after it. Only calls that end make
+    sense here: `run_angle`, `run_target`, `run_until_stalled`.
+
+  A step between two drives brings the robot to a standstill on its own —
+  every segment decelerates to zero, which is why consecutive drives are
+  merged — so a sequential step gets its stationary robot without any new
+  motion maths.
+
+  **How the waiting is done (approach A, chosen over splitting the run).** The
+  arm step is a wait segment plus a marker that runs the motor with
+  `wait=True`. The hub has no threading, so that blocking happens on the follow
+  loop; `trajectory.py` now discounts time spent inside a marker from the path
+  clock, so nothing is skipped. The alternative — splitting the run into
+  several trajectories with the arm movements between them — is conceptually
+  cleaner but changes the file shape that was just proved on the robot, and the
+  contract `build_run` returns.
+
+  **The cost of A, worth saying out loud:** the planner can only *estimate* how
+  long an arm step takes, from its speed and angle, so the run length on screen
+  is an estimate wherever a sequential step appears. The robot genuinely waits
+  either way; only the prediction is approximate, and it should say so.
+
 - [ ] **3.2 Action blocks.** Attach to a step at "X cm in", "X ms in", or
   "X before the end" (negative values, as the builder already supports).
   Offered blocks only use non-blocking calls, because markers run inline on the
