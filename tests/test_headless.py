@@ -87,6 +87,42 @@ def test_the_template_run_now_carries_its_own_code():
     assert first < second
 
 
+def test_a_run_with_no_actions_still_gets_a_run_function():
+    """A plain run -- no arm, no code, nothing attached -- is not a smaller
+    case of step 3.1's self-contained file, just a shorter one.
+
+    hub_module_text's `actions` argument used to double as two different
+    signals: None meant "the caller never described actions at all" (the
+    pre-3.1 export, wired by hand into a runs.py with its own marker
+    functions), and an empty list meant "this run has none" -- but both were
+    falsy, so both skipped run() entirely. build_run always passes a list,
+    even an empty one, so a plain drive-and-turn run downloaded from the
+    planner came back with nothing runs.py could call: the docstring and the
+    data, and nothing else. Caught from a real download -- a "square" test
+    run with no actions -- that did exactly this on the hub.
+    """
+    run = {
+        "version": 1,
+        "name": "run_square",
+        "steps_ms": 6,
+        "robot": "fll_team",
+        "start": {"x": 0, "y": 0, "head": 0},
+        "steps": [
+            {"type": "drive", "cm": 30},
+            {"type": "turn", "deg": 90},
+        ],
+    }
+
+    module = build_run(run)["module_text"]
+
+    assert "from trajectory import Trajectory" in module
+    assert "def run(core):" in module
+    assert "trajectory.follow(core)" in module
+
+    # nothing to bind, so nothing here should even mention it
+    assert "withMarkers" not in module
+
+
 def test_the_template_run_overhangs_the_table_while_turning_home():
     """A real 7mm overhang in the run the team drives, not a false alarm.
 
