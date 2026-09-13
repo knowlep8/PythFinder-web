@@ -715,9 +715,28 @@ working, correctly ordered marker functions.
   carrying a negative, and the int16 extremes are right; with both modules
   hidden the full run still drives and both actions fire in order.
 
+  **Then it found a second one:** `math_ex.py` failed on `import math`, taking
+  `trajectory.py` with it. Pybricks provides `umath`, so that is tried first
+  and plain `math` second — the same shape as `ustruct`.
+
+  **Swept the rest rather than wait for a third.** Every other file in the
+  quick-start imports only `pybricks` or something local; `math_ex.py` and
+  `measure_max_velocity.py` were the only two reaching outside. So there is no
+  third module of this class waiting, which is worth knowing before walking
+  back to the robot.
+
+  Re-checked with both `math` and `struct` hidden and `umath` standing in: the
+  full run drives, 2606 wheel commands, both actions in order, and
+  `example_run` moves its arm twice.
+
   **Still owed on the hub:** whether MicroPython accepts the `@staticmethod`,
   whether the `lambda` closures over `core` behave, and whether the timing
-  holds — the run got nowhere near those before the import failed.
+  holds — both failures were at import, so the run has never reached them.
+
+  **The pattern worth remembering:** every one of these was invisible here and
+  obvious in one second on the robot. Firmware that renames the standard
+  library cannot be stubbed for — a stub reproduces what a module *does*, never
+  what the platform *lacks*.
 - [ ] **3.2 Action blocks.** Attach to a step at "X cm in", "X ms in", or
   "X before the end" (negative values, as the builder already supports).
   Offered blocks only use non-blocking calls, because markers run inline on the
