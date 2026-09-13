@@ -733,10 +733,26 @@ working, correctly ordered marker functions.
   whether the `lambda` closures over `core` behave, and whether the timing
   holds — both failures were at import, so the run has never reached them.
 
+  **Third attempt: it loaded cleanly and did nothing** — which was a fault in
+  the example, not in the library.
+
+  - `example_run.py` defines `run(core)` and nothing calls it. Imported from
+    `runs.py` that is correct; run directly as the program, which is the
+    obvious way to try it, it defines two functions and exits. It has a
+    `__main__` guard now, with `Robot()` built inside the guard so importing it
+    still costs nothing.
+  - Its data was four states of nonsense — **24 milliseconds** of driving, with
+    the two arm commands 6ms apart. Nothing anybody could see. The file was
+    written to be readable and forgot it had a job to do on a robot. It now
+    carries a real 4.3 second run: forward 25cm dropping the arm 8cm in, half a
+    second still, then back to the start raising the arm at the end.
+
   **The pattern worth remembering:** every one of these was invisible here and
-  obvious in one second on the robot. Firmware that renames the standard
-  library cannot be stubbed for — a stub reproduces what a module *does*, never
-  what the platform *lacks*.
+  obvious in seconds on the robot. Firmware that renames the standard library
+  cannot be stubbed for — a stub reproduces what a module *does*, never what the
+  platform *lacks*. And a test fixture small enough to read is often too small
+  to prove anything: four states passed every check here and was unobservable
+  there.
 - [ ] **3.2 Action blocks.** Attach to a step at "X cm in", "X ms in", or
   "X before the end" (negative values, as the builder already supports).
   Offered blocks only use non-blocking calls, because markers run inline on the
