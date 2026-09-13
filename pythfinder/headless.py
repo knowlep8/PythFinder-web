@@ -51,7 +51,31 @@ VERSION = 1
 # which is far more than a path on a screen can show.
 DEFAULT_POSE_EVERY_MS = 20
 
-STEP_TYPES = ("drive", "wait", "turn", "toPoint", "toPose")
+STEP_TYPES = ("drive", "wait", "turn", "toPoint", "toPose", "armStep")
+
+# A sequential arm step is given at least this long, so that a small sweep
+# still reads as a step of its own on the timeline.
+LEAST_ARM_MS = 150
+
+
+def arm_step_ms(step: dict) -> int:
+    """How long an arm step is expected to take, in milliseconds.
+
+    From the motor's own terms: turning `angle` degrees at `speed` degrees per
+    second takes angle/speed seconds. It is an estimate and nothing more -- the
+    robot waits for the motor itself, not for this number -- but the run length
+    on screen is built from it, so it should not be silly.
+
+    `run_until_stalled` has no angle to work from, so it gets a plain guess.
+    """
+    speed = abs(float(step.get("speed", 0))) or 1
+
+    if step.get("call") == "run_until_stalled":
+        return int(step.get("expected_ms", 1000))
+
+    angle = abs(float(step.get("angle", 0)))
+
+    return max(LEAST_ARM_MS, int(angle / speed * 1000))
 
 
 def robot_from_description(description) -> RobotConfig:
@@ -109,16 +133,47 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
     # merged into one segment, so a later step may add to an earlier segment.
     segment_owner = []
     action_steps = {}
+    action_code = {}
+
+    # How far into the current run of merged waits we are.
+    #
+    # Consecutive waits become one segment, and arm steps are waits -- so two
+    # arm steps in a row share a segment. Left at the start of it, both actions
+    # would fire on the same millisecond: the arm told to do two things at
+    # once, and the generated file binding them in whichever order they came
+    # out. Each arm step therefore starts where the previous one finished.
+    into_wait = 0
 
     for index, step in enumerate(steps):
+        kind = step.get("type")
+        merging = kind in ("wait", "armStep")
+
+        if not merging:
+            into_wait = 0
+
         _add_step(builder, step, index, diagnostics)
 
         while len(segment_owner) < len(builder.segments):
             segment_owner.append(index)
+            into_wait = 0          # a new segment: offsets start again
 
         for action in step.get("actions", []):
-            if _add_action(builder, action, index, diagnostics):
+            at = action.get("at")
+
+            if kind == "armStep" and at is None:
+                # its own step: the arm starts as the robot comes to rest
+                at = {"ms": into_wait + 1}
+
+            if _add_action(builder, dict(action, at = at), index, diagnostics):
                 action_steps[action.get("id")] = index
+
+                if action.get("do") is not None:
+                    action_code[action.get("id")] = action["do"]
+                elif kind == "armStep":
+                    action_code[action.get("id")] = _arm_command(step)
+
+        if kind == "armStep":
+            into_wait += arm_step_ms(step)
 
     trajectory = builder.build()
 
@@ -126,7 +181,15 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
         problem.step = _described_step(problem.step, segment_owner)
         diagnostics.append(problem)
 
-    module_text = _hub_module(trajectory, name, steps_ms, diagnostics)
+    # in the order they fire, which is the order the hub binds them -- not the
+    # order the steps were written
+    firing_order = [dict(action_code.get(marker.function, {}),
+                         id = marker.function,
+                         label = _label_for(marker.function, steps))
+                    for marker in trajectory.MARKERS]
+
+    module_text = _hub_module(trajectory, name, steps_ms, diagnostics,
+                              firing_order)
 
     return {"version": VERSION,
             "name": name,
@@ -153,6 +216,13 @@ def _add_step(builder: TrajectoryBuilder, step: dict, index: int, diagnostics: l
 
         elif kind == "wait":
             builder.wait(int(step["ms"]))
+
+        elif kind == "armStep":
+            # The robot stops and the arm runs to completion before the next
+            # step. On the hub that waiting happens on the follow loop, which
+            # discounts it -- so the length here only has to be a fair guess at
+            # how long the motor takes, not a promise.
+            builder.wait(arm_step_ms(step))
 
         elif kind == "turn":
             builder.turnToDeg(float(step["deg"]), bool(step.get("reversed", False)))
@@ -211,6 +281,19 @@ def _add_action(builder: TrajectoryBuilder, action: dict, index: int,
     return True
 
 
+def _arm_command(step: dict) -> dict:
+    """An arm step's motor call, in the shape the generated file needs.
+
+    `wait` is the whole point of a sequential step: the hub blocks here until
+    the motor is done, and the follow loop discounts the time.
+    """
+    return {"motor": step.get("motor", "leftTask"),
+            "call": step.get("call", "run_angle"),
+            "speed": step.get("speed", 500),
+            "angle": step.get("angle"),
+            "wait": True}
+
+
 def _described_step(segment_index, segment_owner):
     """Translate a builder segment number back into a described step number."""
     if segment_index is None:
@@ -228,12 +311,19 @@ def _step_times(builder, segment_owner: list, steps: list) -> list:
     The page needs this to say which step is happening at a given moment, and
     to light up one step's share of the path.
 
-    Merged steps are the awkward case. The builder combines consecutive drives
-    in one direction, and consecutive waits, into a single segment, so a step
-    that was merged into an earlier one has no time of its own: it reports the
-    moment that segment finishes as both its start and its end. Its motion is
-    real, but it lives inside the earlier step's acceleration profile and
-    cannot be separated out.
+    Merged steps are the awkward case, and the two kinds of merge want
+    different answers.
+
+    Consecutive drives in one direction become a single acceleration profile.
+    The second drive genuinely has no slice to point at -- the robot never
+    slows between them -- so it reports the moment the segment finishes as both
+    its start and its end, and the row says "joined to the step above".
+
+    Consecutive arm steps also share a segment, because they are waits. But
+    they are not one motion: they happen strictly one after another, and the
+    segment is already as long as their estimates together. Giving the second
+    one zero length would tell a team member that a step the robot genuinely
+    waits for is free, so each takes its own share by its own estimate.
     """
     ends = {}
 
@@ -245,10 +335,18 @@ def _step_times(builder, segment_owner: list, steps: list) -> list:
     previous = 0
 
     for index, step in enumerate(steps):
-        ends_at = ends.get(index, previous)
+        kind = step.get("type") if isinstance(step, dict) else None
+
+        if index in ends:
+            ends_at = ends[index]
+        elif kind == "armStep":
+            # merged into an earlier wait: take our own share of it
+            ends_at = previous + arm_step_ms(step)
+        else:
+            ends_at = previous
 
         timed.append({"index": index,
-                      "type": step.get("type") if isinstance(step, dict) else None,
+                      "type": kind,
                       "starts_ms": previous,
                       "ends_ms": ends_at})
 
@@ -257,12 +355,26 @@ def _step_times(builder, segment_owner: list, steps: list) -> list:
     return timed
 
 
-def _hub_module(trajectory, name: str, steps_ms: int, diagnostics: list):
+def _label_for(identifier, steps: list) -> str:
+    """What the team called this action, for the comment in the file."""
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+
+        for action in step.get("actions", []):
+            if action.get("id") == identifier:
+                return action.get("label") or identifier
+
+    return identifier if identifier is not None else "action"
+
+
+def _hub_module(trajectory, name: str, steps_ms: int, diagnostics: list,
+                actions: list = None):
     if trajectory.TIME <= 0:
         return None
 
     try:
-        return trajectory.hub_module(name, steps_ms)
+        return trajectory.hub_module(name, steps_ms, actions)
 
     except ValueError as problem:
         # a speed too large for the hub's format, or a robot that is not a

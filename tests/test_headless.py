@@ -34,15 +34,57 @@ def body(module_text):
     return module_text.split("\n", 1)[1]
 
 
+def data_only(module_text):
+    """Just the numbers the robot drives on.
+
+    Picked out by name rather than by cutting the file at the first `def` or
+    `from`: the generated module puts `from trajectory import Trajectory`
+    directly under its docstring, so cutting there left nothing but the
+    docstring on one side and the whole file on the other.
+
+    The docstring itself is excluded on purpose -- the fixture was written by
+    tools/txt_to_py.py and says so, while ours says PythFinder.
+    """
+    keep = ("STEPS", "MARKERS", "COUNT", "DATA")
+    lines = module_text.split("\n")
+
+    return "\n".join(
+        line for line in lines
+        if line.startswith(keep) or line.startswith("    b")
+    )
+
+
 def test_the_template_run_described_as_data_gives_the_golden_file():
-    """The same run the team drives, described as JSON instead of Python."""
+    """The same run the team drives, described as JSON instead of Python.
+
+    Compared on the data alone. The file on the hub predates step 3.2, which
+    adds the attachment motor code and a run() below the constants -- so the
+    numbers the robot drives on must still match it exactly, while the code
+    section is new and is checked separately.
+    """
     result = build_run(TEMPLATE_RUN)
 
     assert result["ok"]
     assert result["total_ms"] == 15641
 
     on_the_hub = (GOLDEN_DIR / "hub" / "template_run.py").read_text()
-    assert body(result["module_text"]) == body(on_the_hub)
+    assert data_only(result["module_text"]) == data_only(on_the_hub)
+
+
+def test_the_template_run_now_carries_its_own_code():
+    """What 3.2 adds on top: the actions, and a run() to bind them."""
+    module = build_run(TEMPLATE_RUN)["module_text"]
+
+    assert "from trajectory import Trajectory" in module
+    assert "def _action_1(core):" in module
+    assert "def _action_2(core):" in module
+    assert "def run(core):" in module
+
+    # bound in firing order, which is what makes the tuple in runs.py
+    # unnecessary
+    first = module.index("_action_1(core),")
+    second = module.index("_action_2(core),")
+    assert first < second
 
 
 def test_the_template_run_overhangs_the_table_while_turning_home():

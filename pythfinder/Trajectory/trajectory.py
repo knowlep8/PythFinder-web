@@ -42,13 +42,17 @@ class Trajectory():
         self.trajGrapher = None
 
     # the module the hub imports, as text, without writing it
-    def hub_module(self, name: str = "trajectory", steps: int = 1) -> str:
+    def hub_module(self, name: str = "trajectory", steps: int = 1,
+                   actions: list = None) -> str:
         """Ready to save as <name>.py and upload to the hub.
 
         Replaces the separate tools/txt_to_py.py step: no .txt has to exist
         first, which is what lets a browser produce a finished file.
+
+        With `actions` -- one per marker, in firing order -- the file carries
+        the attachment motor code and a run() of its own as well.
         """
-        return hub_module_text(self.trajGenerator, name, steps)
+        return hub_module_text(self.trajGenerator, name, steps, actions)
 
     # the text that would be written to the .txt, without writing it
     def text(self,
