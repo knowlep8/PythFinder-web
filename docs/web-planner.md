@@ -579,6 +579,13 @@ working hub file. No actions yet.
   already reads, so `import run_a` and `Trajectory(run_a)` is enough to drive
   it. What 3.2 adds is the attachment motor code and a `run()` of its own, not
   the ability to drive at all.
+
+  **What that run did not prove.** It was planned with no actions —
+  `MARKERS = ()` — because the page cannot add one until 3.2. So the browser's
+  path reached the robot and drove, but **no marker from the planner has ever
+  fired on the hub**: every marker test so far has been against the older
+  hand-made export, or under CPython stubs. The first hub test of 3.2 must
+  include an action of each kind, or that gap simply moves forward one step.
 - [x] **2.8 Save and load.**
   - `src/store.ts` does three separate jobs: autosaving the run in progress,
     keeping a named list to pick between, and export/import as a `.json` file
