@@ -569,10 +569,16 @@ working hub file. No actions yet.
     readout is the hub's memory cost, not the 61KB of Python source that
     carries it.
 
-  **Still to do by hand:** the last mile of the original *done when* — take a
-  run planned here, upload it at code.pybricks.com, and drive it. The file is
-  byte-identical to the one the hub already runs (step 1.8), so this is a
-  formality, but it is the only part that proves the whole chain on the robot.
+  **Done on the robot.** A run planned in the browser was downloaded, added to
+  `runs.py`, and driven on the hub — so the whole chain holds end to end:
+  plan in a page, build in Pyodide, download, upload at code.pybricks.com,
+  drive.
+
+  It dropped into the existing convention without waiting for 3.2: the file is
+  data only for now, but it exposes exactly the four names `Trajectory(module)`
+  already reads, so `import run_a` and `Trajectory(run_a)` is enough to drive
+  it. What 3.2 adds is the attachment motor code and a `run()` of its own, not
+  the ability to drive at all.
 - [x] **2.8 Save and load.**
   - `src/store.ts` does three separate jobs: autosaving the run in progress,
     keeping a named list to pick between, and export/import as a `.json` file
