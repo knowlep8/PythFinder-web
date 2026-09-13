@@ -236,6 +236,20 @@
         max-height: 260px;
         overflow-y: auto;
       }
+
+      ul.all-saved {
+        list-style: none;
+        margin: 8px 0 0;
+        padding: 0;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+      ul.all-saved li { margin: 2px 0; }
+      ul.all-saved button {
+        width: 100%;
+        text-align: left;
+        font-size: 12px;
+      }
     </style>
   </head>
   <body>
@@ -244,6 +258,11 @@
       Step 3.2 — add an arm movement as its own step and the robot waits for
       it; add one to a move and it happens while driving.
     </p>
+
+    <div class="save">
+      <label>who's driving <input id="owner" type="text" placeholder="your name" size="12" /></label>
+      <span class="cost">so saved runs don't collide with anyone else's</span>
+    </div>
 
     <div class="wrap">
       <div class="left">
@@ -313,6 +332,18 @@
           <button id="import" type="button" title="open a run file">Import .json</button>
           <input id="importfile" type="file" accept="application/json,.json" hidden />
         </div>
+
+        <h2 class="spaced">All saved runs</h2>
+        <p class="pysub">
+          Everyone's, not just yours -- there is no login on this site, so
+          this is as open as the rest of it.
+        </p>
+        <div class="save">
+          <button id="refreshall" type="button" title="list every saved run, from anyone">
+            Refresh
+          </button>
+        </div>
+        <ul id="allsaved" class="all-saved"></ul>
 
         <pre id="log">starting...</pre>
       </div>

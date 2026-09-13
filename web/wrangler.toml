@@ -1,0 +1,13 @@
+# Config for the Pages project, read by `wrangler pages deploy` -- see
+# .github/workflows/deploy-pages.yaml. Only exists to bind the KV namespace
+# the functions/ directory uses for saved runs (step 2.8's shared storage,
+# revised in docs/web-planner.md to be self-declared-name rather than
+# Access-identity, since the team has no email to authenticate with).
+
+name = "pythfinder-planner"
+pages_build_output_dir = "dist"
+compatibility_date = "2024-09-23"
+
+[[kv_namespaces]]
+binding = "RUNS"
+id = "8372f594e6c142ad8dc7b9c205787a7a"

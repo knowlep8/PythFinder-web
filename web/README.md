@@ -80,3 +80,39 @@ A wheel is a zip, and this one has no dependencies, so the page fetches
 `/pythfinder.whl` and unpacks it straight into Pyodide's filesystem. That
 avoids serving a package installer as well, which is the only reason the
 container needs nothing from a CDN.
+
+## Deploying it
+
+The container above is for local dev and testing. The real deploy is
+Cloudflare Pages: `.github/workflows/deploy-pages.yaml` builds the wheel and
+the site and runs `wrangler pages deploy` on every push to `main`. See the
+"Run self-hosted, or as a static Pages deploy?" row in `docs/web-planner.md`
+for why, and the workflow file for the two repository secrets it needs.
+
+Two things only have to be done once, by hand, in the Cloudflare dashboard,
+because nothing here can create them on your behalf:
+
+- the Pages project itself, named `pythfinder-planner`;
+- the KV namespace `wrangler.toml` binds as `RUNS` -- run
+  `npx wrangler kv namespace create RUNS` from this directory and paste the
+  id it prints into `wrangler.toml`. Until that id is real, saving and
+  opening runs from another laptop fails closed: the planner still works,
+  it just falls back to browser-only storage (see `src/store.ts`).
+
+## Saved runs across laptops
+
+`functions/api/runs/` is a small set of Cloudflare Pages Functions --
+`GET`/`PUT`/`DELETE /api/runs/<owner>/<name>`, plus `GET /api/runs/all` for
+every owner's runs at once. `<owner>` is whatever name someone typed into the
+page, not an authenticated identity: this site has no login (see
+`docs/web-planner.md`), so the point is keeping people from typing over each
+other's runs by accident, not keeping anyone out.
+
+These Functions do not run under plain `vite dev` -- Vite only serves the
+static site. To exercise the API locally, build the site once and run it
+through Wrangler instead:
+
+```bash
+npm run build
+npx wrangler pages dev dist
+```

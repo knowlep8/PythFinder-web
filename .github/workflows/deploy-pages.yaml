@@ -7,7 +7,8 @@ name: Deploy planner to Cloudflare Pages
 #
 # Needs two repository secrets: CLOUDFLARE_API_TOKEN and
 # CLOUDFLARE_ACCOUNT_ID. The Pages project itself (pythfinder-planner) is
-# created once, by hand, in the Cloudflare dashboard.
+# created once, by hand, in the Cloudflare dashboard, and so is the KV
+# namespace web/wrangler.toml binds as RUNS -- see that file.
 
 on:
     push:
@@ -60,9 +61,14 @@ jobs:
                   npm ci
                   npm run build
 
+            # Run from web/ so wrangler finds wrangler.toml (the KV binding)
+            # and functions/ (the saved-runs API) next to it -- both are
+            # resolved relative to the working directory, not the deployed
+            # dist/ folder.
             - name: Deploy to Cloudflare Pages
               uses: cloudflare/wrangler-action@v3
               with:
                   apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
                   accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-                  command: pages deploy web/dist --project-name=pythfinder-planner
+                  workingDirectory: web
+                  command: pages deploy dist --project-name=pythfinder-planner

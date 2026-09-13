@@ -612,12 +612,25 @@ working hub file. No actions yet.
   the top of the table, and the off-mat marking from 2.6 drew a long red
   stretch with a 45.7cm warning on the step that caused it. Until then that
   path had only been exercised against a 0.7cm pirouette.
-  - *Optional, and the one real gain from self-hosting:* a small storage API in
-    the container — `GET/PUT /runs/<name>.json` against a mounted folder — so a
-    run planned on one laptop opens on another, instead of being passed around
-    as a file. It brings its own questions: who may overwrite whose run, and
-    what backs the folder up. Keep browser storage as the fallback so the
-    planner still works when the host is unreachable.
+  - **Built, revised for a hostless deploy and a teamless login: `functions/
+    api/runs/` on Cloudflare Pages, backed by a KV namespace instead of a
+    mounted folder** — there is no container to mount one in once step 2.1's
+    open decision landed on Pages, and no Access identity to key it by once
+    the team turned out to have no email between them (see the gating
+    decision below). "Who may overwrite whose run" is answered by a name
+    typed into the page, not authenticated: `runs/<owner>/<run-name>` in KV,
+    where `<owner>` is whatever a team member typed into a "who's driving"
+    box, remembered per browser. It stops Jake absent-mindedly saving over
+    Amy's `run_a`, which was the actual problem; it does not stop anyone
+    reading or overwriting anyone else's on purpose, which the team does not
+    need it to, having chosen to skip gating entirely.
+    `GET/PUT/DELETE /api/runs/<owner>/<name>` mirrors the plan's own sketch;
+    `GET /api/runs/all` — every owner, every run — is the one addition, for
+    a mentor to see the whole team's saved work. Browser storage stays the
+    fallback exactly as planned: every call in `store.ts`'s new remote
+    functions is best-effort and fails closed to local-only, so a flaky host
+    is a reason a run does not follow you to another laptop yet, never a
+    reason the planner stops working.
 - [x] **2.9 Work without the host.**
   - `web/public/sw.js` keeps two caches: a shell for the page and its bundle,
     replaced on every deploy, and a heavy one for Pyodide, the wheel and the
@@ -1458,6 +1471,7 @@ Decide when we reach the step named. The recommendation is the default.
 | Decision | Step | Recommendation |
 |---|---|---|
 | Run self-hosted (VPS, or at home behind a Cloudflare tunnel), or serve as a static Cloudflare Pages deploy? | 2.1 (first deploy) | **Decided 2026-09-13: Pages.** The page has no server-side logic — everything still runs in the browser through Pyodide, per decision 2 — so there is nothing a host needs to *do*, only files to serve, and Pages serves those straight from Cloudflare's edge with no machine to keep up and no tunnel in the chain. `docker compose`/`nginx.conf`/`Dockerfile` stay as the local dev/test path, not the deploy path; `.github/workflows/deploy-pages.yaml` builds the wheel and the site and pushes to Pages on every push to `main`. Cloudflare Access still fronts it exactly as it would a tunnel hostname. The one thing this closes off: step 2.8's optional self-hosted storage API needs a filesystem, which Pages doesn't have — it would become a Worker backed by KV or D1 instead, if ever built. |
+| Gate the site with Cloudflare Access, or skip gating? | 2.1 | **Decided 2026-09-13: skip it.** Access is identity-based — email one-time codes, or an IdP login — and no team member has an email to receive one. The site relies on an unlisted URL instead: adequate for what this actually needs to guard against (per decision 2, "keep strangers from stumbling onto it," not a real adversary), and it is a run planner, not a system with anything sensitive in it. Saved runs are scoped by a self-declared name instead of an authenticated identity — see step 2.8's revision. |
 | Upstream the headless refactor to omegacoreFLL/PythFinder, or keep it in our fork? | end of 1 | Offer upstream once goldens prove nothing changed |
 | One fixed team robot, or editable robot settings? | 4.2 | Fixed for the season; editable behind the mentor toggle |
 | How `run()` gets the data on the hub (`fromValues` vs a module self-import) | 3.1 | Whichever works on the hub; test both |

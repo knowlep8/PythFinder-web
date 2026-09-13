@@ -1,15 +1,20 @@
 /**
  * Keeping runs between visits.
  *
- * Two separate jobs, deliberately:
+ * Three separate jobs, deliberately:
  *
  *   autosave    the run being worked on, restored when the page reopens, so
  *               nobody loses an afternoon to a closed tab
  *   the list    runs saved under a name, to pick between
+ *   the shared store   the same, but reachable from another laptop -- see below
  *
- * Both live in this browser only. A run that has to travel to another laptop
- * goes as a .json file -- which is also the backup, until the shared storage
- * in the plan's 2.8 note exists.
+ * Autosave and the list live in this browser only, and stay the source of
+ * truth: a run that has to travel to another laptop can always go as a
+ * .json file, same as before. The shared store is best-effort on top of
+ * that, not instead of it -- every function below returns cleanly (false, an
+ * empty list, or null) if the host cannot be reached, so a flaky connection
+ * never stops the planner working, only stops a run from following you
+ * between laptops until it is back.
  *
  * Every read is defensive. Browser storage can be full, switched off, or hold
  * something from an older version of this page, and none of those is a reason
@@ -20,6 +25,7 @@ import type { Run } from "./types";
 
 const WORKING = "pythfinder.working";
 const SAVED = "pythfinder.saved";
+const OWNER = "pythfinder.owner";
 
 export interface SavedRun {
   name: string;
@@ -142,4 +148,120 @@ export async function importRun(file: File): Promise<Run> {
   }
 
   return parsed;
+}
+
+/**
+ * Who's using the page. Not a login -- there is no gating on this site at
+ * all (see docs/web-planner.md) -- just the name someone typed, remembered
+ * per browser so it does not have to be retyped every visit. It is what
+ * keeps two people's saved runs apart in the shared store below.
+ */
+export function rememberOwner(owner: string): boolean {
+  return write(OWNER, owner);
+}
+
+export function recallOwner(): string {
+  return read<string>(OWNER, "");
+}
+
+export interface RemoteRunSummary {
+  owner: string;
+  name: string;
+  savedAt: string;
+}
+
+/**
+ * The shared store: functions/api/runs/ in the deployed site, backed by a
+ * Cloudflare KV namespace keyed by owner. Every call here is best-effort --
+ * network trouble, or the KV namespace not being configured yet (see
+ * web/wrangler.toml), is not a reason to interrupt anyone, only a reason the
+ * run stays local until the host is reachable again.
+ */
+
+/** Save under this owner and name, replacing any run already using both. */
+export async function saveRemote(owner: string, name: string, run: Run): Promise<boolean> {
+  if (owner.trim() === "") {
+    return false;
+  }
+
+  try {
+    const response = await fetch(
+      `/api/runs/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(run),
+      },
+    );
+
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** One owner's saved runs, name and when only -- cheap, for a picker list. */
+export async function listRemote(owner: string): Promise<RemoteRunSummary[]> {
+  if (owner.trim() === "") {
+    return [];
+  }
+
+  try {
+    const response = await fetch(`/api/runs?owner=${encodeURIComponent(owner)}`);
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const body = (await response.json()) as { runs?: RemoteRunSummary[] };
+
+    return body.runs ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Every saved run, from every owner -- the mentor view. */
+export async function listAllRemote(): Promise<RemoteRunSummary[]> {
+  try {
+    const response = await fetch("/api/runs/all");
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const body = (await response.json()) as { runs?: RemoteRunSummary[] };
+
+    return body.runs ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export async function openRemote(owner: string, name: string): Promise<Run | null> {
+  try {
+    const response = await fetch(
+      `/api/runs/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`,
+    );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const run = await response.json();
+
+    return looksLikeRun(run) ? run : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function forgetRemote(owner: string, name: string): Promise<void> {
+  try {
+    await fetch(`/api/runs/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
+  } catch {
+    // best-effort -- the local copy is already gone either way
+  }
 }

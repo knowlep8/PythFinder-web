@@ -16,11 +16,18 @@ import { hubCost, nameProblem, saveModule } from "./download";
 import {
   exportRun,
   forgetNamed,
+  forgetRemote,
   importRun,
+  listAllRemote,
+  listRemote,
   listSaved,
+  openRemote,
+  recallOwner,
   recallWorking,
+  rememberOwner,
   rememberWorking,
   saveNamed,
+  saveRemote,
 } from "./store";
 import { normaliseHead } from "./field";
 import type { FieldPose } from "./field";
@@ -69,6 +76,10 @@ const forgetButton = document.getElementById("forget") as HTMLButtonElement;
 const exportButton = document.getElementById("export") as HTMLButtonElement;
 const importButton = document.getElementById("import") as HTMLButtonElement;
 const importFile = document.getElementById("importfile") as HTMLInputElement;
+
+const ownerBox = document.getElementById("owner") as HTMLInputElement;
+const refreshAllButton = document.getElementById("refreshall") as HTMLButtonElement;
+const allSavedList = document.getElementById("allsaved") as HTMLUListElement;
 
 let pose: FieldPose = { ...START };
 let latest: BuildResult | null = null;
@@ -135,6 +146,9 @@ function stepAt(ms: number): number | null {
 
 async function main() {
   output.textContent = "";
+
+  // Who's using this browser, remembered from last time.
+  ownerBox.value = recallOwner();
 
   // Whatever was being worked on last time. A closed tab should not cost a
   // team member their afternoon.
@@ -279,26 +293,104 @@ async function main() {
     rebuild();
   }
 
-  function refreshSavedList() {
-    const saved = listSaved();
+  /**
+   * The saved-run picker. Local storage renders straight away -- it is the
+   * source of truth and never waits on a network. Anything saved under this
+   * owner's name on another laptop, and not already known here, is merged in
+   * once the shared store answers; a slow or unreachable host just means
+   * that merge never arrives; the local list still works.
+   */
+  async function refreshSavedList() {
+    const local = listSaved();
     const chosen = savedList.value;
+    const known = new Set(local.map((entry) => entry.name));
 
     savedList.replaceChildren();
 
     const heading = document.createElement("option");
     heading.value = "";
-    heading.textContent = saved.length === 0 ? "— nothing saved —" : "— saved runs —";
+    heading.textContent = known.size === 0 ? "— nothing saved —" : "— saved runs —";
     savedList.append(heading);
 
-    for (const entry of saved) {
+    for (const entry of local) {
       const option = document.createElement("option");
       option.value = entry.name;
       option.textContent = entry.name;
       savedList.append(option);
     }
 
-    savedList.value = saved.some((entry) => entry.name === chosen) ? chosen : "";
+    savedList.value = known.has(chosen) ? chosen : "";
     forgetButton.disabled = savedList.value === "";
+
+    const owner = ownerBox.value.trim();
+
+    if (owner === "") {
+      return;
+    }
+
+    const remote = await listRemote(owner);
+    const newlyKnown = remote.filter((entry) => !known.has(entry.name));
+
+    if (newlyKnown.length === 0) {
+      return;
+    }
+
+    heading.textContent = "— saved runs —";
+
+    for (const entry of newlyKnown) {
+      const option = document.createElement("option");
+      option.value = entry.name;
+      option.textContent = `${entry.name} (from another laptop)`;
+      savedList.append(option);
+    }
+  }
+
+  /**
+   * The mentor view: every saved run, from every owner. On demand only, via
+   * the Refresh button, not loaded at start-up -- it is a network call the
+   * planner itself does not need, and 2.9's offline story means the page
+   * must open and plan a run with no network reachable at all.
+   */
+  async function refreshAllSaved() {
+    const runs = await listAllRemote();
+
+    allSavedList.replaceChildren();
+
+    if (runs.length === 0) {
+      const empty = document.createElement("li");
+      empty.className = "empty";
+      empty.textContent = "— nothing saved yet, or the host is unreachable —";
+      allSavedList.append(empty);
+      return;
+    }
+
+    for (const entry of runs) {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+
+      button.type = "button";
+      button.textContent = `${entry.owner} — ${entry.name}`;
+      button.title = `saved ${new Date(entry.savedAt).toLocaleString()}`;
+
+      button.addEventListener("click", async () => {
+        const run = await openRemote(entry.owner, entry.name);
+
+        if (run === null) {
+          log(`could not open "${entry.name}" (${entry.owner})`);
+          return;
+        }
+
+        // Switching the owner box to match is what stops a mentor peeking
+        // at Amy's run from accidentally re-saving it as their own.
+        ownerBox.value = entry.owner;
+        rememberOwner(entry.owner);
+        loadRun(run);
+        log(`opened "${entry.name}" (${entry.owner})`);
+      });
+
+      item.append(button);
+      allSavedList.append(item);
+    }
   }
 
   /**
@@ -406,20 +498,63 @@ async function main() {
       log("could not save: this browser is not letting the page store anything");
     }
 
-    refreshSavedList();
+    void refreshSavedList();
     savedList.value = nameBox.value;
     forgetButton.disabled = false;
+
+    // Best-effort on top of the local save above, not instead of it -- see
+    // store.ts. A team member who typed no name just keeps a local-only run.
+    const owner = ownerBox.value.trim();
+
+    if (owner === "") {
+      return;
+    }
+
+    const name = nameBox.value;
+
+    void saveRemote(owner, name, currentRun()).then((ok) => {
+      log(
+        ok
+          ? `also saved "${name}" for ${owner}, so it opens on another laptop`
+          : `could not reach the shared store -- "${name}" is only saved in this browser`,
+      );
+    });
   });
 
   savedList.addEventListener("change", () => {
-    const chosen = listSaved().find((entry) => entry.name === savedList.value);
+    const name = savedList.value;
 
-    forgetButton.disabled = savedList.value === "";
+    forgetButton.disabled = name === "";
 
-    if (chosen !== undefined) {
-      loadRun(chosen.run);
-      log(`opened "${chosen.name}"`);
+    if (name === "") {
+      return;
     }
+
+    const local = listSaved().find((entry) => entry.name === name);
+
+    if (local !== undefined) {
+      loadRun(local.run);
+      log(`opened "${name}"`);
+      return;
+    }
+
+    // Not known locally -- it must be one of listRemote()'s "from another
+    // laptop" entries, so fetch its actual content before it can be opened.
+    const owner = ownerBox.value.trim();
+
+    if (owner === "") {
+      return;
+    }
+
+    void openRemote(owner, name).then((run) => {
+      if (run === null) {
+        log(`could not open "${name}" from the shared store`);
+        return;
+      }
+
+      loadRun(run);
+      log(`opened "${name}" from another laptop`);
+    });
   });
 
   forgetButton.addEventListener("click", () => {
@@ -430,8 +565,14 @@ async function main() {
     }
 
     forgetNamed(going);
-    refreshSavedList();
+    void refreshSavedList();
     log(`deleted "${going}" from this browser`);
+
+    const owner = ownerBox.value.trim();
+
+    if (owner !== "") {
+      void forgetRemote(owner, going);
+    }
   });
 
   exportButton.addEventListener("click", () => {
@@ -526,9 +667,16 @@ async function main() {
     }
   });
 
+  ownerBox.addEventListener("input", () => {
+    rememberOwner(ownerBox.value);
+    void refreshSavedList();
+  });
+
+  refreshAllButton.addEventListener("click", () => void refreshAllSaved());
+
   showPose();
   showSaveState();
-  refreshSavedList();
+  void refreshSavedList();
   applyWaypoints();
 
   // Save what is on screen straight away. Autosaving only on edit meant a run
