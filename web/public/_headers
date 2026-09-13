@@ -1,0 +1,32 @@
+# Cache rules for Cloudflare Pages. Same intent as web/nginx.conf, for when
+# the site is served from Pages instead of the container -- see the "Run
+# self-hosted, or as a static Pages deploy?" row in docs/web-planner.md.
+
+# The Pyodide runtime is ~10MB and identical for the life of a release, so a
+# returning kid pays for it once.
+/pyodide/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Vite writes content-hashed names, so these can never go stale.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Rebuilt with the library on every deploy, and its name does not change --
+# must be revalidated or the team plans runs with last week's code.
+/pythfinder.whl
+  Cache-Control: no-cache
+
+/index.html
+  Cache-Control: no-cache
+
+# Must never be served from the browser's own HTTP cache: a stale service
+# worker keeps control of the page and goes on serving a stale app.
+/sw.js
+  Cache-Control: no-cache
+
+# nginx once served this as application/octet-stream, because its mime.types
+# had no entry for it, and the browser silently refused to run it as a
+# module. Forced explicitly here in case Pages' own guess is ever wrong in
+# the same way -- cheap insurance against a bug already hit once.
+/*.mjs
+  Content-Type: text/javascript

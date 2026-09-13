@@ -1,0 +1,68 @@
+name: Deploy planner to Cloudflare Pages
+
+# The planner has no server-side logic -- all the Python runs in the browser
+# through Pyodide -- so it is served as a static build from Cloudflare's edge
+# rather than from the container on main. See the "Run self-hosted, or as a
+# static Pages deploy?" row in docs/web-planner.md.
+#
+# Needs two repository secrets: CLOUDFLARE_API_TOKEN and
+# CLOUDFLARE_ACCOUNT_ID. The Pages project itself (pythfinder-planner) is
+# created once, by hand, in the Cloudflare dashboard.
+
+on:
+    push:
+        branches:
+            - main
+        paths:
+            - "web/**"
+            - "pythfinder/**"
+            - "tools/slim_wheel.py"
+            - "pyproject.toml"
+            - ".github/workflows/deploy-pages.yaml"
+    workflow_dispatch:
+
+jobs:
+    deploy:
+        runs-on: ubuntu-latest
+        environment: PythFinder
+
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Install uv
+              run: pip install uv
+
+            # Same three commands as web/README.md's "Working on it" section --
+            # the wheel the browser fetches, slimmed from 13.5MB to ~0.11MB by
+            # stripping the menu images and docs the planner never opens.
+            - name: Build and slim the wheel
+              run: |
+                  uv build --wheel --out-dir dist
+                  python tools/slim_wheel.py dist/pythfinder-*.whl --out-dir web/public
+                  mv web/public/pythfinder-*.whl web/public/pythfinder.whl
+
+            - name: Set up Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+
+            # npm run build's own `prebuild` copies Pyodide out of node_modules
+            # and the mat/robot images out of pythfinder/Images -- both read
+            # straight from this checkout, same as the Dockerfile's stages did.
+            - name: Build the site
+              working-directory: web
+              run: |
+                  npm ci
+                  npm run build
+
+            - name: Deploy to Cloudflare Pages
+              uses: cloudflare/wrangler-action@v3
+              with:
+                  apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+                  accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+                  command: pages deploy web/dist --project-name=pythfinder-planner
