@@ -22,7 +22,7 @@ step that caused them.
 The run description looks like this:
 
     {
-      "version": 1,
+      "version": 2,
       "name": "run_a",
       "steps_ms": 6,
       "robot": "fll_team",
@@ -36,7 +36,13 @@ The run description looks like this:
       ]
     }
 
-See docs/web-planner.md, step 1.7.
+"robot" is "fll_team", a bare object of planning numbers (the pre-5.3 shape),
+or a named profile with its planning numbers nested under "planning" and a
+"driveBase" alongside them -- see robot_from_description. "start" may carry a
+"name" too, step 5.3's own addition; neither this function nor anything below
+reads it, since it exists only for the browser's own pickers.
+
+See docs/web-planner.md, steps 1.7 and 5.3.
 """
 
 from pythfinder.Components.BetterClasses.mathEx import Point, Pose
@@ -47,7 +53,7 @@ from pythfinder.Trajectory.robotConfig import FLL_ROBOT, RobotConfig
 from pythfinder.Trajectory.trajectoryBuilder import TrajectoryBuilder
 
 
-VERSION = 1
+VERSION = 2
 
 # how often a pose is kept for drawing. The states are one per millisecond,
 # which is far more than a path on a screen can show.
@@ -81,23 +87,40 @@ def arm_step_ms(step: dict) -> int:
 
 
 def robot_from_description(description) -> RobotConfig:
-    """The robot to plan for: the team's, or one described by its numbers."""
+    """The robot to plan for: the team's, or one described by its numbers.
+
+    Step 5.3 adds a third shape: a named profile, with its planning numbers
+    nested under "planning" and a "driveBase" alongside them --
+
+        {"name": "Team robot",
+         "planning": {"track_width_cm": 16, "max_velocity_cm_s": 64.3, ...},
+         "driveBase": {"wheel_diameter_mm": 56, ...}}
+
+    "driveBase" is read by nothing here: those numbers matter once the hub
+    file is generated from a DriveBase (5.5/5.6), not for planning a path
+    today. `description.get("planning", description)` is what makes the old,
+    flat shape and the new, nested one both work with the same code below --
+    a run without a "planning" key is the pre-5.3 shape, and its own numbers
+    sit where "planning"'s would otherwise be.
+    """
     if description is None or description == "fll_team":
         return FLL_ROBOT.copy()
 
     if isinstance(description, str):
         raise ValueError("unknown robot '{0}'".format(description))
 
-    track_width = float(description["track_width_cm"])
-    offset = float(description.get("center_offset_cm", 0))
+    numbers = description.get("planning", description)
+
+    track_width = float(numbers["track_width_cm"])
+    offset = float(numbers.get("center_offset_cm", 0))
 
     return RobotConfig(
         kinematics = TankKinematics(track_width, center_offset = Point(offset, 0)),
         constraints = Constraints2D(track_width = track_width),
-        real_max_velocity = float(description["max_velocity_cm_s"]),
-        max_power = float(description.get("max_power", 100)),
-        width_cm = float(description.get("width_cm", 0)),
-        length_cm = float(description.get("length_cm", 0)))
+        real_max_velocity = float(numbers["max_velocity_cm_s"]),
+        max_power = float(numbers.get("max_power", 100)),
+        width_cm = float(numbers.get("width_cm", 0)),
+        length_cm = float(numbers.get("length_cm", 0)))
 
 
 def pose_from_description(description) -> Pose:

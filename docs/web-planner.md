@@ -1453,7 +1453,15 @@ partway through a turn.
     and every golden that used `ms` placement is converted or retired
     deliberately.
 
-- [ ] **5.3 Robot profiles and start positions: several of each, selectable,
+  **The version bump already happened, in 5.3.** Both steps share the one
+  `version: 1 → 2` — 5.3 needed a shape change (a run's `robot` and `start`
+  carry more than they used to) before this step existed, so it took the
+  bump rather than leave two consecutive ones. `VERSION = 2` and the "Run
+  file format" section below are already updated; this step's own remaining
+  work (rejecting `at: {ms}`, the `turn` rule, the Firestore query for any
+  saved `ms` placement) does not touch `version` again when it lands.
+
+- [x] **5.3 Robot profiles and start positions: several of each, selectable,
   and addable from the page.** Replaces 4.2 and 4.3. Needed before 5.5,
   because the generated file has to carry the DriveBase numbers from
   somewhere, and there is more than one set of them (a practice robot and a
@@ -1503,6 +1511,56 @@ partway through a turn.
     pickers on another, a run saved with them opens the same on a third that
     is offline, and editing a profile shows the "changed since" note on a run
     that used it rather than altering it.
+
+  **Built as specified, with one thing the plan left for whoever built it to
+  settle.** `web/src/profiles.ts` holds the two built-ins (`TEAM_ROBOT` from
+  `robotConfig.py`'s own numbers, `wheel_diameter_mm: 56` marked as an
+  unmeasured placeholder and `axle_track_mm: 160` from the 16cm track width;
+  `LEFT_LAUNCH_START` at `(-46, -83, 0)`), the Firestore reads/writes
+  (`robots/<name>`, `starts/<name>`) and the browser-storage cache, all in
+  `store.ts`'s own best-effort style — every remote call returns cleanly
+  offline, and both built-ins stay in the list even then. `firestore.rules`
+  opens both collections the same way runs already are.
+  `web/src/profilePicker.ts` is one generic widget (a `<select>` ending in
+  "＋ New…", an "Edit" button, and an inline form of labelled fields — never
+  a dialog) driving both pickers in `main.ts`'s run header, told what to edit
+  through get/set closures rather than knowing about robots or starts itself.
+
+  **What the plan left open: telling "dragged away" apart from "someone
+  edited it".** A run's `start` keeps its `name` through a drag, per the
+  plan — but that means a dragged start and a start whose shared numbers
+  changed elsewhere look identical: both are "this run's copy of `<name>`
+  no longer matches the live `<name>`". Distinguishing them would need a
+  second, separately-tracked flag with no use beyond cosmetics, since the
+  fix is the same either way: copy the current numbers in. So both pickers
+  treat the two cases as one — a note reading `differs from the current
+  "<name>"` with a single "use the current numbers" button — for robots and
+  starts alike. This satisfies the plan's "custom" and "changed since"
+  language as one mechanism rather than two.
+
+  **Verified in Node against `pythfinder.headless`, not yet in a browser.**
+  `robot_from_description` now reads `description.get("planning",
+  description)`, so a named profile's nested numbers, a bare `RobotNumbers`
+  object and `"fll_team"` all resolve to the same `RobotConfig` —
+  `tests/test_robot_profiles.py` checks the four attributes that matter
+  (`track_width`, `REAL_MAX_VEL`, `WIDTH_CM`, `LENGTH_CM`) agree across all
+  three, that a profile's `driveBase` numbers change nothing about the
+  planned run even when set far from the built-in's, and that
+  `"fll_team"` still resolves via `robot_from_description` and reports
+  `version: 2` from `build_run`. `cd web && npx tsc --noEmit` passes.
+  `python -m pytest tests -q` (via `uv run`): **152 passed, 1 xfailed** — the
+  147 from before this step plus these 5, the one known xfail unchanged.
+  **Not opened in an actual browser** — no way to drive Chrome from this
+  session — so the picker UI, the inline forms, the drag-vs-edit note, and
+  the offline fallback are checked by reading the code and by the type
+  checker, not by watching them run. Worth a real look before relying on it
+  at a practice.
+
+  **Left for later steps, as the plan says.** No hub-side `core.configure`
+  and no DriveBase numbers in the generated file (5.5/5.6); the download
+  format is untouched. No delete for a profile or a start — the plan only
+  ever asks for "＋ New…" and "Edit", and built-ins cannot be removed anyway,
+  so there was nothing pushing towards adding one.
 
 - [ ] **5.4 Compile a run into a move list (headless, on the PC).** A new
   `pythfinder/Export/driveProgram.py`, taking the same run description as
@@ -1559,15 +1617,17 @@ partway through a turn.
 
 ## Run file format
 
-As implemented in step 1.7 and understood by `build_run`.
+As implemented in step 1.7, and step 5.3's addition of named robot profiles
+and start positions. `version` follows step 5.2's own note above: this is
+the one bump both steps share.
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "name": "run_a",
   "robot": "fll_team",
   "steps_ms": 6,
-  "start": { "x": -46, "y": -83, "head": 0 },
+  "start": { "x": -46, "y": -83, "head": 0, "name": "Left launch" },
   "steps": [
     { "type": "drive", "cm": 75,
       "actions": [ { "id": "a1", "at": { "cm": 35 },
@@ -1597,10 +1657,37 @@ As implemented in step 1.7 and understood by `build_run`.
   becomes the action's function body verbatim, with no motor guard; a motor
   command gets `if core.<motor> is not None:` first, because it names one
   motor the file can check before touching it.
-- `robot` is `"fll_team"`, or an object of numbers for the settings panel:
-  `track_width_cm`, `max_velocity_cm_s`, and optionally `center_offset_cm`,
-  `max_power`, `width_cm`, `length_cm`.
-- `version` lets us migrate old saved runs when the format changes.
+- `robot` is `"fll_team"`; a bare object of planning numbers (the pre-5.3
+  shape, still read: `track_width_cm`, `max_velocity_cm_s`, and optionally
+  `center_offset_cm`, `max_power`, `width_cm`, `length_cm`); or, since step
+  5.3, a named profile with those same numbers nested under `planning` and a
+  `driveBase` alongside them:
+
+  ```json
+  "robot": {
+    "name": "Team robot",
+    "planning": { "track_width_cm": 16, "max_velocity_cm_s": 64.3,
+                  "center_offset_cm": -3.5, "width_cm": 19, "length_cm": 14 },
+    "driveBase": { "wheel_diameter_mm": 56, "axle_track_mm": 160,
+                   "straight_speed": 200, "straight_acceleration": 400,
+                   "turn_rate": 150, "turn_acceleration": 300,
+                   "use_gyro": true }
+  }
+  ```
+
+  `robot_from_description` reads `planning` (or the object itself, for the
+  older shape) and ignores `driveBase` entirely — those numbers matter once
+  the hub file is generated from a DriveBase (5.5/5.6), not for planning a
+  path today. A run always carries a full copy, not a reference to a stored
+  profile, so it means the same thing on a laptop that has never seen that
+  profile — see step 5.3.
+- `start.name` (step 5.3) is which named start position this came from, kept
+  even once dragging the robot has moved it away from that start's own
+  numbers. `build_run` does not read it; it exists for the browser's own
+  pickers.
+- `version` lets us migrate old saved runs when the format changes. 1 → 2 is
+  step 5.3's format (this section), landed ahead of step 5.2's own reason for
+  the same bump — see 5.2's note above.
 
 ---
 

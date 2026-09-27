@@ -29,12 +29,105 @@ import {
   saveNamed,
   saveRemote,
 } from "./store";
+import {
+  LEFT_LAUNCH_START,
+  TEAM_ROBOT,
+  allRobots,
+  allStarts,
+  clone,
+  profileFromRunRobot,
+  refreshRobots,
+  refreshStarts,
+  robotsMatch,
+  saveRobot,
+  saveStart,
+  startsMatch,
+} from "./profiles";
+import { ProfilePicker } from "./profilePicker";
+import type { PickerField } from "./profilePicker";
 import { normaliseHead } from "./field";
 import type { FieldPose } from "./field";
-import type { BuildResult, PathPose, Run, RunStep } from "./types";
+import type { BuildResult, PathPose, RobotProfile, Run, RunStep, StartPosition } from "./types";
 
-/** The left launch area, as in fll_run_template.py. */
-const START: FieldPose = { x: -46, y: -83, head: 0 };
+/**
+ * The Robot picker's form -- step 5.3. Track width, top speed, centre
+ * offset, width and length are what `RobotNumbers` already carried and
+ * `robot_from_description` already reads; the DriveBase group is new, in
+ * Pybricks' own units, and unused by planning today (see profiles.ts).
+ */
+const ROBOT_FIELDS: PickerField<RobotProfile>[] = [
+  {
+    key: "track_width_cm", label: "track width", unit: "cm", heading: "Planning",
+    get: (r) => r.planning.track_width_cm,
+    set: (r, v) => { r.planning.track_width_cm = v as number; },
+  },
+  {
+    key: "max_velocity_cm_s", label: "top speed", unit: "cm/s", heading: "Planning",
+    get: (r) => r.planning.max_velocity_cm_s,
+    set: (r, v) => { r.planning.max_velocity_cm_s = v as number; },
+  },
+  {
+    key: "center_offset_cm", label: "centre offset", unit: "cm", step: 0.5, heading: "Planning",
+    get: (r) => r.planning.center_offset_cm ?? 0,
+    set: (r, v) => { r.planning.center_offset_cm = v as number; },
+  },
+  {
+    key: "width_cm", label: "width", unit: "cm", heading: "Planning",
+    get: (r) => r.planning.width_cm ?? 0,
+    set: (r, v) => { r.planning.width_cm = v as number; },
+  },
+  {
+    key: "length_cm", label: "length", unit: "cm", heading: "Planning",
+    get: (r) => r.planning.length_cm ?? 0,
+    set: (r, v) => { r.planning.length_cm = v as number; },
+  },
+  {
+    key: "wheel_diameter_mm", label: "wheel diameter", unit: "mm", heading: "DriveBase",
+    get: (r) => r.driveBase.wheel_diameter_mm,
+    set: (r, v) => { r.driveBase.wheel_diameter_mm = v as number; },
+  },
+  {
+    key: "axle_track_mm", label: "axle track", unit: "mm", heading: "DriveBase",
+    get: (r) => r.driveBase.axle_track_mm,
+    set: (r, v) => { r.driveBase.axle_track_mm = v as number; },
+  },
+  {
+    key: "straight_speed", label: "straight speed", unit: "mm/s", step: 10, heading: "DriveBase",
+    get: (r) => r.driveBase.straight_speed,
+    set: (r, v) => { r.driveBase.straight_speed = v as number; },
+  },
+  {
+    key: "straight_acceleration", label: "straight accel.", unit: "mm/s²", step: 10,
+    heading: "DriveBase",
+    get: (r) => r.driveBase.straight_acceleration,
+    set: (r, v) => { r.driveBase.straight_acceleration = v as number; },
+  },
+  {
+    key: "turn_rate", label: "turn rate", unit: "°/s", step: 10, heading: "DriveBase",
+    get: (r) => r.driveBase.turn_rate,
+    set: (r, v) => { r.driveBase.turn_rate = v as number; },
+  },
+  {
+    key: "turn_acceleration", label: "turn accel.", unit: "°/s²", step: 10, heading: "DriveBase",
+    get: (r) => r.driveBase.turn_acceleration,
+    set: (r, v) => { r.driveBase.turn_acceleration = v as number; },
+  },
+  {
+    key: "use_gyro", label: "use gyro", kind: "checkbox", heading: "DriveBase",
+    get: (r) => r.driveBase.use_gyro,
+    set: (r, v) => { r.driveBase.use_gyro = v as boolean; },
+  },
+];
+
+/** The Start picker's form -- just the numbers a run's `start` already held. */
+const START_FIELDS: PickerField<StartPosition>[] = [
+  { key: "x", label: "x", unit: "cm", get: (s) => s.x, set: (s, v) => { s.x = v as number; } },
+  { key: "y", label: "y", unit: "cm", get: (s) => s.y, set: (s, v) => { s.y = v as number; } },
+  {
+    key: "head", label: "heading", unit: "°",
+    get: (s) => s.head, set: (s, v) => { s.head = v as number; },
+  },
+];
 
 /** The template run, as something to start from rather than an empty page. */
 const FIRST_STEPS: RunStep[] = [
@@ -81,7 +174,15 @@ const ownerBox = document.getElementById("owner") as HTMLInputElement;
 const refreshAllButton = document.getElementById("refreshall") as HTMLButtonElement;
 const allSavedList = document.getElementById("allsaved") as HTMLUListElement;
 
-let pose: FieldPose = { ...START };
+const robotPickerBox = document.getElementById("robotpicker") as HTMLElement;
+const startPickerBox = document.getElementById("startpicker") as HTMLElement;
+
+let pose: FieldPose = { x: LEFT_LAUNCH_START.x, y: LEFT_LAUNCH_START.y, head: LEFT_LAUNCH_START.head };
+// step 5.3: the run's own copy of a robot and (optionally) which named start
+// it came from -- see currentRun() and profiles.ts's own docstring for why
+// these are copies, not references
+let robotProfile: RobotProfile = clone(TEAM_ROBOT);
+let startName: string | undefined = LEFT_LAUNCH_START.name;
 let latest: BuildResult | null = null;
 
 function log(line: string) {
@@ -155,7 +256,9 @@ async function main() {
   const restored = recallWorking();
 
   if (restored !== null) {
-    pose = { ...restored.start };
+    pose = { x: restored.start.x, y: restored.start.y, head: restored.start.head };
+    startName = restored.start.name;
+    robotProfile = profileFromRunRobot(restored.robot);
     nameBox.value = restored.name;
   }
 
@@ -197,6 +300,88 @@ async function main() {
     },
   });
 
+  // Step 5.3: the Robot and Start pickers. Picking a start moves the robot
+  // there, the same snapping 4.3 sketched; picking a robot just changes what
+  // the run is planned for, with nothing on the field to move.
+  const robotPicker = new ProfilePicker<RobotProfile>(robotPickerBox, {
+    title: "Robot",
+    fields: ROBOT_FIELDS,
+    list: allRobots,
+    refresh: refreshRobots,
+    persist: saveRobot,
+    // "New robot" pre-fills from the one selected, so a variant is one change away
+    makeNew: () => ({ ...clone(robotProfile), name: "" }),
+    onPick: (picked) => {
+      robotProfile = picked;
+      rebuild();
+    },
+    log,
+  });
+
+  const startPicker = new ProfilePicker<StartPosition>(startPickerBox, {
+    title: "Start",
+    fields: START_FIELDS,
+    list: allStarts,
+    refresh: refreshStarts,
+    persist: saveStart,
+    // "New start" pre-fills from wherever the robot currently sits, so the
+    // usual way to add one is to drag the robot into place and save it
+    makeNew: () => ({ name: "", x: pose.x, y: pose.y, head: pose.head }),
+    onPick: (picked) => {
+      startName = picked.name;
+      pose = { x: picked.x, y: picked.y, head: picked.head };
+      view.setPose(pose);
+      showPose();
+      rebuild();
+    },
+    log,
+  });
+
+  /**
+   * Keep both pickers honest with what the run currently holds, and show a
+   * note when that differs from the shared entry of the same name -- either
+   * because someone edited the profile elsewhere, or because dragging the
+   * robot moved it off the start it came from. Both read the same way here:
+   * the fix is the same one-click "use the current numbers" either way, so
+   * there is no separate "custom" state to track on top of it.
+   */
+  function applyProfilePickers() {
+    robotPicker.setSelected(robotProfile);
+
+    const liveRobot = allRobots().find((known) => known.name === robotProfile.name);
+    const robotChanged = liveRobot !== undefined && !robotsMatch(liveRobot, robotProfile);
+
+    robotPicker.showNote(
+      robotChanged ? `differs from the current "${robotProfile.name}"` : null,
+      liveRobot === undefined ? null : () => {
+        robotProfile = clone(liveRobot);
+        rebuild();
+      },
+    );
+
+    const embeddedStart: StartPosition | undefined =
+      startName === undefined ? undefined : { name: startName, x: pose.x, y: pose.y, head: pose.head };
+
+    startPicker.setSelected(embeddedStart);
+
+    const liveStart = startName === undefined
+      ? undefined
+      : allStarts().find((known) => known.name === startName);
+    const startChanged =
+      liveStart !== undefined && embeddedStart !== undefined && !startsMatch(liveStart, embeddedStart);
+
+    startPicker.showNote(
+      startChanged ? `differs from the current "${startName}"` : null,
+      liveStart === undefined ? null : () => {
+        startName = liveStart.name;
+        pose = { x: liveStart.x, y: liveStart.y, head: liveStart.head };
+        view.setPose(pose);
+        showPose();
+        rebuild();
+      },
+    );
+  }
+
   const playback = new Playback({
     onTick: (ms, playing) => {
       playButton.textContent = playing ? "⏸" : "▶";
@@ -228,12 +413,16 @@ async function main() {
 
   function currentRun(): Run {
     return {
-      version: 1,
+      // step 5.3: a run now carries its own copy of a named robot profile,
+      // and (optionally) which named start it came from -- see profiles.ts
+      version: 2,
       // the name goes into the file's own docstring, so it follows the box
       name: nameProblem(nameBox.value) === null ? nameBox.value : "run",
       steps_ms: 6,
-      robot: "fll_team",
-      start: { x: pose.x, y: pose.y, head: pose.head },
+      robot: robotProfile,
+      start: startName === undefined
+        ? { x: pose.x, y: pose.y, head: pose.head }
+        : { x: pose.x, y: pose.y, head: pose.head, name: startName },
       steps: editor.getSteps(),
     };
   }
@@ -278,11 +467,18 @@ async function main() {
     // as dragging its marker -- so this is the one place waypoints refresh
     // from, rather than a call at each place that can change one
     applyWaypoints();
+
+    // same reasoning for the pickers: dragging the robot, picking a start,
+    // and typing a number all end up here, so this is the one place their
+    // "changed since" notes get a chance to refresh
+    applyProfilePickers();
   }
 
-  /** Put a run on screen: its steps, where it starts, and its name. */
+  /** Put a run on screen: its steps, where it starts, its robot, and its name. */
   function loadRun(run: Run) {
-    pose = { ...run.start };
+    pose = { x: run.start.x, y: run.start.y, head: run.start.head };
+    startName = run.start.name;
+    robotProfile = profileFromRunRobot(run.robot);
     nameBox.value = run.name;
 
     editor.setSteps(run.steps);
@@ -678,6 +874,13 @@ async function main() {
   showSaveState();
   void refreshSavedList();
   applyWaypoints();
+  applyProfilePickers();
+
+  // Best-effort, same as refreshSavedList() above -- local storage (and the
+  // built-ins) already gave both pickers something to show before either of
+  // these can possibly have answered.
+  void robotPicker.refresh().then(applyProfilePickers);
+  void startPicker.refresh().then(applyProfilePickers);
 
   // Save what is on screen straight away. Autosaving only on edit meant a run
   // that was opened and left alone was never written down, which is exactly

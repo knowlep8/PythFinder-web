@@ -112,13 +112,65 @@ export interface RobotNumbers {
   length_cm?: number;
 }
 
+/**
+ * Pybricks' own numbers for a `DriveBase` -- step 5.3. Units as Pybricks
+ * takes them (mm, not cm), so they can go into the generated file unconverted
+ * once 5.5/5.6 exist. `build_run` does not read these at all today: a run is
+ * still planned from `planning` below, the way it always has been.
+ */
+export interface DriveBaseNumbers {
+  wheel_diameter_mm: number;
+  axle_track_mm: number;
+  straight_speed: number;
+  straight_acceleration: number;
+  turn_rate: number;
+  turn_acceleration: number;
+  use_gyro: boolean;
+}
+
+/**
+ * A named robot, step 5.3. Stored team-wide (`robots/<name>` in Firestore),
+ * picked from the "Robot" picker in the run header, and copied whole into
+ * whatever run picks it -- see `Run.robot`.
+ */
+export interface RobotProfile {
+  name: string;
+  planning: RobotNumbers;
+  driveBase: DriveBaseNumbers;
+}
+
+/**
+ * A named place to start from, step 5.3. Stored team-wide
+ * (`starts/<name>` in Firestore), picked from the "Start" picker, which
+ * moves the robot there on the field.
+ */
+export interface StartPosition {
+  name: string;
+  x: number;
+  y: number;
+  head: number;
+}
+
 export interface Run {
   version: number;
   name: string;
   /** ms per exported state; 6 is what the hub uses */
   steps_ms: number;
-  robot: "fll_team" | RobotNumbers;
-  start: { x: number; y: number; head: number };
+  /**
+   * "fll_team" and a bare `RobotNumbers` are the pre-5.3 shapes -- still read
+   * by `build_run`, and `"fll_team"` still means the built-in team profile.
+   * A run saved by the page now always writes the full `RobotProfile` it was
+   * planned with, name and numbers copied in whole rather than referenced, so
+   * the run means the same thing on a laptop that has never seen that
+   * profile. See step 5.3.
+   */
+  robot: "fll_team" | RobotNumbers | RobotProfile;
+  /**
+   * `name` (step 5.3) is which named start this came from -- kept even once
+   * dragging the robot has moved it away from that start's own numbers, so
+   * the run still says where it started from.
+   */
+  start: { x: number; y: number; head: number; name?: string };
   steps: RunStep[];
 }
 

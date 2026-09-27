@@ -18,5 +18,17 @@ service cloud.firestore {
     match /{path=**}/items/{name} {
       allow read: if true;
     }
+
+    // Robot profiles and start positions, step 5.3 -- team-wide rather than
+    // per-owner like runs above, since the team shares one robot and one set
+    // of launch areas. Same open-by-design rule: nothing here is sensitive,
+    // and the team has no login to gate it with anyway.
+    match /robots/{name} {
+      allow read, write: if true;
+    }
+
+    match /starts/{name} {
+      allow read, write: if true;
+    }
   }
 }

@@ -199,6 +199,46 @@
       }
       select:focus { outline: 1px solid #00e5ff; }
 
+      /* step 5.3: the Robot and Start pickers in the run header */
+      .pickers { display: flex; gap: 24px; flex-wrap: wrap; margin: 4px 0 14px; }
+      .picker { display: flex; align-items: center; gap: 6px; }
+      .pickerlabel { color: #8a8f98; }
+      .pickernote {
+        margin: -6px 0 10px;
+        font-size: 12px;
+        color: #ffca7a;
+      }
+      .pickernote button { font-size: 12px; padding: 2px 6px; margin-left: 4px; }
+      .pickerform {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin: 0 0 14px;
+        padding: 10px 12px;
+        background: #17191c;
+        border: 1px solid #2a2e34;
+        border-radius: 6px;
+        max-width: 420px;
+      }
+      .pickerform label {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        color: #b9bec6;
+        font-size: 13px;
+      }
+      .pickerform input[type="text"] { flex: 1; }
+      .pickerform input[type="number"] { width: 90px; }
+      .pickerheading {
+        margin: 6px 0 -2px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #6b7280;
+      }
+      .pickerformbuttons { display: flex; gap: 8px; margin-top: 4px; }
+
       pre {
         white-space: pre-wrap;
         line-height: 1.6;
@@ -262,6 +302,13 @@
     <div class="save">
       <label>who's driving <input id="owner" type="text" placeholder="your name" size="12" /></label>
       <span class="cost">so saved runs don't collide with anyone else's</span>
+    </div>
+
+    <!-- step 5.3: the run's own robot and start, named and addable, shared
+         with the rest of the team -->
+    <div class="pickers">
+      <div id="robotpicker"></div>
+      <div id="startpicker"></div>
     </div>
 
     <div class="wrap">
