@@ -51,8 +51,10 @@ have (see step 0.1).
   `MAX_POWER` 100.
 - In `Robot/fll_robot_team.png`, the front of the robot points at the LEFT edge
   of the image.
-- Hub attachment motors are `core.leftTask` (port C) and `core.rightTask`
-  (port D). Both are Pybricks `Motor`s and either may be `None`.
+- Hub attachment motors are `core.leftTask` (port A) and `core.rightTask`
+  (port E). Both are Pybricks `Motor`s and either may be `None`. Since the
+  rebuild (2026-09-27) the drive wheels are on F (left) and B (right), and
+  there are no colour sensors; the quick-start's `config.py` is the record.
 
 ---
 
