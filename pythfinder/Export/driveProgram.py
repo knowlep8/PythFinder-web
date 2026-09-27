@@ -13,9 +13,16 @@ step 5.5, not this one -- everything here is plain, JSON-shaped dicts.
 
 Pose is tracked here on the PC, by plain trigonometry, in the planner's own
 field convention (head 0 faces up the field, increasing clockwise as drawn --
-docs/web-planner.md, step 2.3). A `turn_to` move always carries the absolute
-heading to turn *to*; turning *by* an amount, and which way to spin to get
-there, is the hub's own job -- step 5.6.
+docs/web-planner.md, step 2.3). A `turn_to` move carries the absolute heading
+to turn *to* -- but also, as "by", the signed amount the library itself would
+turn: shortest path normally, the long way round when `turn`'s own `reversed`
+asks for it (angularSegment.py picks find_longest_path over find_shortest_path
+for exactly that reason). The two can reach the *same* absolute heading by
+very different physical sweeps -- 90 degrees clockwise is a different arc of
+the mat than 270 the other way, even though a robot ends up facing the same
+way either way -- so `deg` alone would silently throw that difference away.
+Picking *how* to spin to match `by` (direction, and magnitude past 180) is
+still the hub's own job -- step 5.6 -- `by` only says what was planned.
 
 No RobotConfig, no TrajectoryBuilder, no acceleration profile: unlike
 build_run, this never has to know how fast the robot can go, only where it
@@ -29,7 +36,9 @@ fire in.
 
 import math
 
-from pythfinder.Components.BetterClasses.mathEx import normalize_degres
+from pythfinder.Components.BetterClasses.mathEx import (find_longest_path,
+                                                         find_shortest_path,
+                                                         normalize_degres)
 from pythfinder.Trajectory.diagnostics import Diagnostic
 from pythfinder.headless import STEP_TYPES, _arm_command, pose_from_description
 
@@ -64,7 +73,7 @@ def compile_drive_program(run: dict) -> dict:
     list of plain dicts:
 
         {"op": "straight", "mm": 250.0, "then": "none" | "stop"}
-        {"op": "turn_to", "deg": 90.0}
+        {"op": "turn_to", "deg": 90.0, "by": -270.0}
         {"op": "wait", "ms": 600}
         {"op": "action", "id": "a1", "do": {...}, "label": "Left arm down"}
         {"op": "arm", "motor": "leftTask", "call": "run_angle",
@@ -76,6 +85,16 @@ def compile_drive_program(run: dict) -> dict:
     caller) to look the rest up afterwards -- so this list is everything
     step 5.5 needs to generate code, with no second walk over the original
     run.
+
+    A turn_to's "by" is the signed rotation the library itself plans, in
+    the same clockwise-positive convention as every heading here -- not
+    always the shorter way round to "deg". `turn`'s own `reversed` asks
+    angularSegment.py for find_longest_path instead of find_shortest_path,
+    which can reach the *same* absolute heading by sweeping the *opposite*
+    direction through most of a full circle -- 90 degrees clockwise from 0
+    is a different arc of the mat than 270 degrees the other way, even
+    though both end up facing 90. "deg" alone cannot tell those apart, which
+    is what "by" is for; see _Moves.turn_to and the module docstring above.
 
     "end_pose" is the planned pose this run finishes at -- not part of the
     plan's own move shape, but cheap to return and exactly what
@@ -129,16 +148,22 @@ def compile_drive_program(run: dict) -> dict:
                 y += cm * math.sin(rad)
 
             elif kind == "turn":
-                # 'reversed' only ever picks which way the hub spins to get
-                # there (5.6) -- a turn always ends up facing 'deg', however
-                # it gets there, so the move list only ever needs the target
-                target = normalize_degres(float(step["deg"]))
+                # 'reversed' picks find_longest_path over find_shortest_path
+                # in angularSegment.py -- not just a different way to spin to
+                # the same place, but a different physical sweep of the mat,
+                # so it has to ride along as "by", not be thrown away here.
+                raw_target = float(step["deg"])
+                reversed_ = bool(step.get("reversed", False))
+
+                by = (find_longest_path(raw_target, head) if reversed_ else
+                     find_shortest_path(raw_target, head))
+                target = normalize_degres(head + by)
 
                 _reject_speed_limits(diagnostics, step, index)
                 _process_turn_actions(moves, diagnostics, step, index)
 
-                if not _headings_match(head, target):
-                    moves.turn_to(target)
+                if abs(by) > HEADING_EPSILON_DEG:
+                    moves.turn_to(target, by)
 
                 head = target
 
@@ -183,10 +208,17 @@ def compile_drive_program(run: dict) -> dict:
 
                 x, y = target_x, target_y
 
-                if not _headings_match(head, final_head):
-                    moves.turn_to(final_head)
+                # poseSegment.py's own final AngularSegment never receives
+                # 'reversed' either -- it only shifted the *facing* turn
+                # above, via +180 on the target -- so this last turn is
+                # always the shortest way round, whatever 'reversed' was
+                by = find_shortest_path(final_head, head)
+                target = normalize_degres(head + by)
 
-                head = final_head
+                if abs(by) > HEADING_EPSILON_DEG:
+                    moves.turn_to(target, by)
+
+                head = target
 
             else:
                 diagnostics.append(Diagnostic.error(
@@ -250,8 +282,15 @@ class _Moves:
         self._open_heading = heading_deg
         self._open_sign = sign
 
-    def turn_to(self, deg: float):
-        self.list.append({"op": "turn_to", "deg": round(deg, 4)})
+    def turn_to(self, deg: float, by: float):
+        """deg is the absolute heading to turn to; by is the signed amount
+        the library itself plans to turn -- shortest path normally, the long
+        way round when a `turn` step's own `reversed` asks angularSegment.py
+        for find_longest_path instead. The two can name the same "deg" while
+        meaning very different sweeps of the mat, which is exactly why both
+        ride along rather than just the target (see the module docstring)."""
+        self.list.append({"op": "turn_to", "deg": round(deg, 4),
+                          "by": round(by, 4)})
         self.stop()
 
     def wait(self, ms: float):
@@ -321,16 +360,27 @@ def _turn_toward(moves: _Moves, x: float, y: float, target_x: float,
     """toPoint/toPose's first turn: face the target, or its mirror image if
     driving there backwards -- pointSegment.py's own `head = tangent; if
     reversed: head = 180 + head`. Returns the heading afterwards, whether or
-    not a turn_to move was actually needed to reach it."""
+    not a turn_to move was actually needed to reach it.
+
+    Always the shortest way round, never the long way -- unlike a plain
+    `turn` step, pointSegment.py/poseSegment.py never pass their own
+    `reversed` on to the AngularSegment that does this turning
+    (`AngularSegment(None, None, kinematics, head)`, no fifth argument), so
+    there is no find_longest_path branch to reach here. 'reversed' already
+    did its only job by shifting `face` 180 degrees above.
+    """
     face = _tangent_face(x, y, target_x, target_y, head)
 
     if reversed_:
         face = normalize_degres(180 + face)
 
-    if not _headings_match(head, face):
-        moves.turn_to(face)
+    by = find_shortest_path(face, head)
+    target = normalize_degres(head + by)
 
-    return face
+    if abs(by) > HEADING_EPSILON_DEG:
+        moves.turn_to(target, by)
+
+    return target
 
 
 def _reject_speed_limits(diagnostics: list, step: dict, index: int):

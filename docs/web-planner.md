@@ -1597,10 +1597,15 @@ partway through a turn.
   DriveBase. Pose is tracked with plain trigonometry, matching the library's
   own formulas line for line: `inLineCM`'s `pose + cm·(cos, sin)(head)` for a
   drive, `pointSegment.py`'s `atan2(dy, dx)` tangent (±180° if reversed) for
-  `toPoint`/`toPose`'s facing turn, and `turnToDeg`'s target heading — a turn
-  always ends up facing `deg`, whichever way `reversed` picks to spin, so the
-  move list never has to say which direction the hub should turn (that is
-  5.6's own job, as the plan already said).
+  `toPoint`/`toPose`'s facing turn, and `turnToDeg`'s target heading. Every
+  `turn_to` move carries that target as `deg` — and also, as `by`, the signed
+  rotation the library itself plans to make: `find_shortest_path` normally,
+  `find_longest_path` when a `turn` step's own `reversed` asks for it
+  (angularSegment.py). Picking *which way* to spin, and turning by more than
+  `by` says, is still 5.6's job; `by` only records what was planned, not how
+  the hub carries it out. (An earlier version of this step left `by` out
+  entirely, reasoning that both paths reach the same `deg` — true, and
+  irrelevant: see the correction below.)
 
   **`then` is decided by one rule, not two.** A straight gets `then: "none"`
   whenever it flows directly out of the straight before it — same heading,
@@ -1614,15 +1619,42 @@ partway through a turn.
   two drives either side of a no-op turn merge exactly as if the turn had
   never been written.
 
-  **Turns that change nothing are skipped, and `reversed` never changes where
-  a turn ends up.** `find_longest_path` (the library's own "spin the long way
-  round") still lands on the same absolute heading as `find_shortest_path` —
-  checked directly, `turnToDeg(137)` and `turnToDeg(137, reversed=True)`
-  produce byte-identical move lists here — so the move list only ever needs
-  the target, never a direction; picking the direction and turning *by* an
-  amount are 5.6's job. A turn within `HEADING_EPSILON_DEG` of the current
-  heading is skipped entirely, including when that lets two straights either
-  side of it merge into one continuous roll.
+  **A turn that changes nothing is skipped — decided by `by`, not by
+  comparing headings.** `find_longest_path` (the library's own "spin the long
+  way round") still lands on the same absolute heading as `find_shortest_path`
+  would, but by a very different physical sweep — 90° one way is a different
+  arc of the mat than 270° the other way, even facing the same direction at
+  the end. A turn is skipped only when `abs(by) <= HEADING_EPSILON_DEG`, which
+  also correctly catches a case comparing headings alone would miss:
+  `turnToDeg(0, reversed = True)` from a heading of 0 is not a no-op, it is a
+  full 360° loop (`find_longest_path(0, 0) == -360`, since `signum(0)` reads
+  positive) — real, visible motion that a "does `deg` equal the current
+  heading?" check would have silently dropped. Where a turn genuinely is
+  skipped, it does not break a straight run either side of it: two drives
+  around a no-op turn still merge into one continuous roll.
+
+  **Found and fixed after this step first shipped: `reversed` was being
+  thrown away.** The first version of this step reasoned that since
+  `find_longest_path` and `find_shortest_path` reach the same final heading
+  (true — proven by construction: `head + by ≡ target (mod 360)` either way),
+  a `turn_to` move only ever needed to carry that target, and wrote a test —
+  `turnToDeg(137)` and `turnToDeg(137, reversed = True)` produce
+  byte-identical move lists — that asserted the bug as if it were a feature.
+  The reasoning mistook "reaches the same place" for "gets there the same
+  way": a robot told to turn 90° clockwise and one told to turn 270°
+  counter-clockwise end up facing the same way, but sweep entirely different
+  arcs of the mat on the way there, which matters on a table with things on
+  it. Caught in review, not by a test — the test that would have caught it
+  had to be written *after* the mistake was named, which is itself the
+  lesson: a test that only checks the property you already believe cannot
+  catch a wrong belief. `by` now rides along on every `turn_to`, `turn`'s
+  `reversed` feeds `find_longest_path` instead of being discarded, and the
+  reversed-back-to-the-same-heading case above is covered directly. Two new
+  tests pin the fix: a reversed turn's `by` has `abs(by) > 180` and the
+  opposite sign from the unreversed one, and — across every comparable golden
+  run — summing every `by` from the start heading lands exactly on the
+  reported end heading, mod 360, which is what makes `by` trustworthy for
+  5.6 to replay rather than merely plausible.
 
   **Timed placement is trivial inside a `wait`, and refused on a moving
   step, exactly as the plan asked.** A `wait` step's own length splits around
@@ -1657,7 +1689,7 @@ partway through a turn.
   shows, so a run built from one is not quietly assigned a different speed
   than the page displays.
 
-  *Verified:* `uv run python -m pytest tests -q` — **205 passed, 3 skipped, 1
+  *Verified:* `uv run python -m pytest tests -q` — **218 passed, 3 skipped, 1
   xfailed** (152 passed + 1 xfailed before this step; 3 skips are golden runs
   with no run-description equivalent at all — `markers_absolute`,
   `constraints_marker`, `interrupt_marker` — each built straight against
@@ -1699,6 +1731,14 @@ partway through a turn.
     *current* heading to the planned absolute one, so a drifted heading gets
     corrected at every turn instead of carried forward. Unless 5.1 shows
     `DriveBase` already does that.
+  - **Note (from 5.4): a `turn_to` move's `by` is not a suggestion.** Where
+    `abs(by) > 180`, or its sign disagrees with the shortest path from the
+    hub's own current heading, this helper's "always shortest" default is
+    the *wrong* answer — the run was planned to sweep the long way round (a
+    `turn` step's `reversed`), and correcting toward the shortest path would
+    silently drive a different arc of the mat than the one the run was
+    checked against. `by`'s own direction and magnitude have to win whenever
+    they disagree with "shortest from here".
   - `trajectory.py` stays until every run on the hub has been regenerated;
     old and new files can sit in the same `runs.py`.
   - *Done when:* one regenerated run drives from `runs.py` via the selector.

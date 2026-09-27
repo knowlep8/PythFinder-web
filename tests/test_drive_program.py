@@ -351,15 +351,79 @@ def test_a_turn_to_the_current_heading_is_skipped():
     assert compiled["end_pose"]["head"] == 0
 
 
-def test_turns_reversed_flag_never_changes_the_final_heading():
-    """'reversed' on a turn only ever picks which way the hub spins to get
-    there (5.6) -- the target heading in the move list is the same either
-    way."""
+def test_turns_reversed_flag_never_changes_the_final_heading_but_does_change_by():
+    """'reversed' picks find_longest_path over find_shortest_path in
+    angularSegment.py -- the same final "deg", reached by sweeping the mat
+    the opposite way and the long way round, which "by" has to say so the
+    move list is not silently lying about the shape of the turn."""
     plain = compile_drive_program(run_with([{"type": "turn", "deg": 137}]))
     reversed_ = compile_drive_program(
         run_with([{"type": "turn", "deg": 137, "reversed": True}]))
 
-    assert plain["moves"] == reversed_["moves"]
+    plain_turn = ops(plain, "turn_to")[0]
+    reversed_turn = ops(reversed_, "turn_to")[0]
+
+    # same target heading either way...
+    assert plain_turn["deg"] == reversed_turn["deg"] == 137.0
+
+    # ...reached by very different physical sweeps
+    assert abs(plain_turn["by"]) <= 180
+    assert abs(reversed_turn["by"]) > 180
+    assert plain_turn["by"] * reversed_turn["by"] < 0, "opposite directions"
+
+    # the long way round is exactly "the short way, minus a full circle"
+    assert reversed_turn["by"] == pytest.approx(
+        plain_turn["by"] - 360 * (1 if plain_turn["by"] >= 0 else -1))
+
+
+def test_a_reversed_turn_back_to_the_current_heading_is_a_full_loop_not_a_no_op():
+    """reversed=True with deg equal to the current heading is not "nothing
+    to do" -- angularSegment.py's find_longest_path still sweeps a full
+    circle to get back to the same place, and dropping that move would lose
+    real, visible motion the robot actually performs."""
+    result = compile_drive_program(run_with([{"type": "turn", "deg": 0,
+                                              "reversed": True}]))
+
+    assert result["ok"], result["diagnostics"]
+    turn = ops(result, "turn_to")[0]
+    assert turn["deg"] == 0.0
+    assert abs(turn["by"]) == pytest.approx(360.0)
+    assert result["end_pose"]["head"] == 0.0
+
+
+def test_to_point_and_to_pose_facing_turns_are_always_the_shortest_way():
+    """pointSegment.py/poseSegment.py never pass their own 'reversed' on to
+    the AngularSegment that turns to face the target -- 'reversed' only
+    shifts the target 180 degrees first -- so 'by' here should never exceed
+    180 degrees, unlike a plain 'turn' step's reversed=True."""
+    plain = compile_drive_program(run_with([{"type": "toPoint", "x": 40, "y": 0}],
+                                           start = {"x": 0, "y": 0, "head": 170}))
+    reversed_ = compile_drive_program(run_with(
+        [{"type": "toPoint", "x": 40, "y": 0, "reversed": True}],
+        start = {"x": 0, "y": 0, "head": 170}))
+
+    for result in (plain, reversed_):
+        for turn in ops(result, "turn_to"):
+            assert abs(turn["by"]) <= 180
+
+
+@pytest.mark.parametrize("name", sorted(COMPARABLE_RUNS))
+def test_by_telescopes_from_the_start_heading_to_the_end_heading(name):
+    """Every turn_to's "by" is the signed change in heading it plans --
+    summed in order, starting from the run's own start heading, it has to
+    land exactly on the end heading this module reports, mod 360. This is
+    what makes "by" trustworthy for the hub to replay (5.6): if the sum
+    drifted from the tracked pose, "by" would not actually describe the
+    planned path."""
+    run = run_with(COMPARABLE_RUNS[name])
+    compiled = compile_drive_program(run)
+    assert compiled["ok"], compiled["diagnostics"]
+
+    total = sum(m["by"] for m in ops(compiled, "turn_to"))
+    predicted_end = (run["start"]["head"] + total) % 360
+    actual_end = compiled["end_pose"]["head"] % 360
+
+    assert heading_difference(predicted_end, actual_end) < 1e-3
 
 
 def test_a_skipped_turn_does_not_break_a_straight_run_either_side():
