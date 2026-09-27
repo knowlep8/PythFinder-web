@@ -41,16 +41,14 @@ const STARTS_CACHE = "pythfinder.starts";
  * `robotConfig.py`'s `FLL_ROBOT` -- kept honest with that file by hand, the
  * same relationship `types.ts`'s own docstring already asks for.
  *
- * The DriveBase numbers are starting points, not measurements: nothing in
- * either repo has ever driven with a `DriveBase` yet (that is step 5.1).
- * `wheel_diameter_mm` in particular has **no measured value at all** -- 56 is
- * a placeholder for a 56mm competition wheel, clearly marked as one so
- * whoever runs 5.1 knows to replace it rather than trust it. `axle_track_mm`
- * starts as the 16cm track width in Pybricks' units (kept as a separate
- * field regardless, since Pybricks' axle track is often tuned on the robot
- * to make turns land -- see step 5.3's own note). The four speed/
- * acceleration numbers are ordinary DriveBase starting values, meant to be
- * tuned on the hub once 5.1 exists, not measurements of anything.
+ * `wheel_diameter_mm` and `axle_track_mm` are measured, on the base the kids
+ * rebuilt on 2026-09-27, with the quick-start's `drivebase_test.py`: B drove
+ * 1018mm for 1000 at 54.6, so 55.6; C then turned 379.6 for 360 and, at
+ * 160.1, 360.2. They match `config.py` there on purpose -- a run whose
+ * numbers differ makes the hub build a second DriveBase (step 5.6). Axle
+ * track is its own field, not the planning track width, because it is tuned
+ * to make turns land rather than measured with a ruler. The four speed/
+ * acceleration numbers are still ordinary starting values, not measurements.
  */
 export const TEAM_ROBOT: RobotProfile = {
   name: "Team robot",
@@ -62,8 +60,8 @@ export const TEAM_ROBOT: RobotProfile = {
     length_cm: 14,
   },
   driveBase: {
-    wheel_diameter_mm: 56, // placeholder -- not yet measured, see above
-    axle_track_mm: 160, // from the 16cm track width
+    wheel_diameter_mm: 55.6, // measured, see above
+    axle_track_mm: 160.1, // measured, see above
     straight_speed: 200,
     straight_acceleration: 400,
     turn_rate: 150,

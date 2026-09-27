@@ -2072,6 +2072,14 @@ partway through a turn.
     to `runs.py`, and drive it from the selector — once with a profile whose
     wheel and axle numbers match `config.py`, once with numbers that differ,
     which is what shows whether a second DriveBase on the same motors works.
+  - *Progress, 2026-09-27, rebuilt base* (wheels now on F and B, no colour
+    sensors): B three times at 54.6 went 40¼, 40, 40 in (mean 1018mm), so
+    the wheel is **55.6mm**; C at 55.6/168.8 turned 379.6°, giving **160.1mm**,
+    and a second C at 160.1 read 360.2° — settled. The new base is 8.7mm
+    narrower in effective track than the old one, far more than scaling for
+    the wheel alone would have guessed. Both numbers are in `config.py` and
+    the planner's built-in team profile, deliberately equal. Still to do: F,
+    the squares, and a downloaded run from `runs.py`.
 
   **The planner-UI half is done; the robot session above is still
   outstanding** — that is what keeps this box unticked.
