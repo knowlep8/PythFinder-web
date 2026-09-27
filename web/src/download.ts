@@ -35,13 +35,25 @@ export function nameProblem(name: string): string | null {
   return null;
 }
 
-/** What the file costs on the hub, read back out of the module itself. */
-export function hubCost(moduleText: string): { states: number; bytes: number } {
-  const count = moduleText.match(/^COUNT = (\d+)$/m);
-  const states = count ? Number(count[1]) : 0;
+/**
+ * What the file costs the hub, read back out of the module itself.
+ *
+ * Step 5.7: there is no more COUNT of recorded states to read off -- the
+ * DriveBase file is a short list of calls, not a payload of encoded numbers
+ * -- so "moves" counts the lines that actually drive, turn, wait or fire
+ * something in run(), the same way the old readout counted states: from the
+ * file's own text, because there is no separate structured move list on
+ * this side of the worker boundary.
+ */
+export function hubCost(moduleText: string): { moves: number; bytes: number } {
+  const moves = moduleText.match(
+    /^\s*(drive\.straight\(|core\.turn_to\(|wait\(\d|drive\.settings\(|_action_\d+\(core\)|core\.\w+Task\.\w+\()/gm,
+  );
 
-  // three little-endian int16 per state: left, right, heading
-  return { states, bytes: states * 6 };
+  return {
+    moves: moves?.length ?? 0,
+    bytes: new TextEncoder().encode(moduleText).length,
+  };
 }
 
 /** Save the module as <name>.py. */

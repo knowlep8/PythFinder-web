@@ -220,10 +220,16 @@ export interface BuildResult {
   poses: PathPose[];
   markers: BuiltMarker[];
   diagnostics: Diagnostic[];
-  /** the .py file to download, or null when there is nothing to drive */
+  /**
+   * The .py file to download, or null when there is nothing to drive.
+   *
+   * Step 5.7: this is the DriveBase file (driveModule.py, steps 5.4/5.5) --
+   * straight(), turn_to(), wait() and the run's own actions, a few hundred
+   * bytes of readable Python -- not the older recording of wheel powers
+   * every few milliseconds. It elides nothing, so the Python view (3.4)
+   * reads this same field rather than a second, elided copy of it.
+   */
   module_text: string | null;
-  /** step 3.4: the same file, its DATA payload elided -- for reading, not saving */
-  code_text: string | null;
   /** step 3.4: the equivalent TrajectoryBuilder chain, for the desktop tool */
   builder_source: string | null;
 }

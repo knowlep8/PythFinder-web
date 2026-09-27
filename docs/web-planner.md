@@ -1354,9 +1354,10 @@ Order these after watching the kids use phase 3.
   17 new tests (`test_speed_limits.py`), including the merged-step and
   chain-execution checks above; 146 pass in total, the one known xfail
   unchanged.
-- [ ] **4.6** Hub memory budget: total bytes across all runs in the selector.
-  *Likely unnecessary after phase 5, which shrinks a run to a few hundred
-  bytes. Hold until 5.1 says whether phase 5 goes ahead.*
+- [ ] ~~**4.6** Hub memory budget: total bytes across all runs in the selector.~~
+  *Struck (step 5.7): the hedge above has been confirmed, not just held. A
+  DriveBase file costs a few hundred bytes, not the ~15KB a recorded run
+  did (step 0.1) -- there is no budget left to watch.*
 - [ ] **4.7** *(stretch)* Send straight to the hub over Web Bluetooth, the way
   code.pybricks.com does. Needs the secure context from 2.1.
 - [ ] **4.8** Sharpen the offline story: check what actually survives a
@@ -2037,6 +2038,124 @@ partway through a turn.
     battery and five on a tired one. The groups have to be tight — that is
     the premise of the whole phase, and 5.8 waits on it.
 
+  **The planner-UI half is done; the robot session above is still
+  outstanding** — that is what keeps this box unticked.
+
+  - `build_run` (headless.py) now calls `drive_module_text` itself and hands
+    its file back as its own `module_text`, rather than the recorded
+    rendering (`hubModule.py`) it used to build. **Wired inside `build_run`,
+    not alongside it in the worker,** because the worker's protocol is one
+    Python call per build (2.2) — a second call from `worker.ts` would mean
+    either a second round trip or reaching into Pyodide's globals from the
+    JS side, and would still need somewhere to merge the two diagnostics
+    lists. Doing it in `build_run` keeps that one-call contract, and keeps
+    the merge in Python next to the diagnostics it is merging.
+  - `code_text` (3.4's elided view) is gone from the contract, not just
+    unused: the DriveBase file has no payload to elide, so `module_text` and
+    what used to be `code_text` would always be identical. The Python view
+    (`main.ts`) now reads `module_text` for both the download and the
+    read-only box, and the panel's own wording dropped "the code half of the
+    file above" for "the whole file above" — 3.4's *other* view, the
+    equivalent `TrajectoryBuilder` chain (`builder_source`), is untouched:
+    it was never built from the recorded format and step 5.5 didn't change
+    it.
+  - **Diagnostics from `drive_module_text` reach the same `diagnostics`
+    list `build_run` already returns, not a second list** — but not by
+    concatenating the two wholesale. `compile_drive_program` (5.4) enforces
+    the same placement rules `build_run`'s own loop does (5.2 unified them
+    on purpose), so when a run is broken, both usually flag *something* —
+    in different words, and, for a step two merged drives share, quite
+    possibly against a different step number (`compile_drive_program` checks
+    each described step's own length; it does not know which steps
+    `TrajectoryBuilder` merged into one acceleration profile). Showing both
+    would tell a team member the same mistake twice. So: a run-wide
+    diagnostic (`step: None` — today, only "this run has no DriveBase
+    numbers of its own") always gets through; a step-specific one from the
+    drive compiler is folded in only when `build_run`'s own loop found
+    *nothing* to say about that step, i.e. only when it is genuinely new
+    information. The one case this could still miss — the drive compiler
+    alone refusing a shape `build_run`'s own loop missed entirely — is
+    covered too: when that happens, every one of its diagnostics is kept.
+  - `hubModule.py`, `Trajectory.hub_module`/`hub_module_code`, and the hub's
+    own `trajectory.py` are untouched. `build_run`'s private wiring to them
+    (`_hub_module`, `_hub_module_code`, `_label_for`, and the `action_code`
+    map that fed them) is deleted, since nothing calls it now — the
+    functions themselves, and their own tests (`test_hub_module.py`), are
+    what step 5.8 will decide about, not this step.
+  - The readout (`download.ts`'s `hubCost`) now counts **moves**, read out
+    of the generated file's own text the same way the old "states" count
+    was (`COUNT = ...`): there is no structured move list on the browser
+    side of the worker boundary, only the text. It matches lines that
+    drive, turn, wait, change settings, or fire an action —
+    `drive.straight(`, `core.turn_to(`, a `wait(` with a number after it,
+    `drive.settings(`, `_action_N(core)`, and any `core.*Task.*(` call (an
+    arm step's own inline call). Bytes are the file's real UTF-8 size
+    (`TextEncoder`), not a computed payload size — there is no fixed-size
+    payload left to compute. The template run's default file now reads
+    **"7 moves, 0.6KB on the hub"**, replacing "2607 states, 15.3KB".
+  - The clock (`total`) and the run readout both gained a leading `~` and a
+    hover title — *"an estimate — the firmware picks its own
+    acceleration now"* — and the run readout's own label reads
+    "run (estimate):". Matches the "(estimated)" wording step 4.5's own
+    chain output already uses for an arm step's line.
+  - Struck 4.6 in the doc, with the reason: its own "likely unnecessary"
+    hedge is now confirmed, and the risk-list entry above that pointed at it
+    is updated to say so.
+  - **Deviation from the brief.** The brief asked for "any drive_module_text
+    diagnostics ... on the right step or as run-level" — read literally,
+    every one of them, always. What is actually built is narrower, for the
+    duplicate-message reason just above: a step-specific one only gets
+    through when `build_run`'s own loop had nothing to say about that step.
+    The one the brief names by example — "no DriveBase numbers of its own"
+    — is exactly the case that always gets through (it is always run-wide),
+    so the example still holds; it is the general, step-specific case that
+    does not, on purpose.
+
+  **Python tests.** `uv run python -m pytest tests -q` — **242 passed, 3
+  skipped, 1 xfailed, unchanged in total** (same before and after: two tests
+  that pinned the recorded format's elision through `build_run`
+  (`test_python_view.py`) were replaced by one that pins the opposite — that
+  `module_text` elides nothing now — and the elision itself moved to a new
+  test in `test_hub_module.py`, called directly against
+  `Trajectory.hub_module_code` so that coverage does not just move house,
+  it moves onto firmer ground: the exact function 3.4 always meant). Every
+  test across `test_action_boundaries.py`, `test_code_actions.py`,
+  `test_editor_shapes.py`, `test_headless.py`, `test_robot_profiles.py` and
+  `test_speed_limits.py` that read `module_text`/`code_text` expecting the
+  recorded format's own shape (`from trajectory import Trajectory`, a
+  trailing comma on a bound `lambda`, `MARKERS = (...)`, a `COUNT =` line)
+  was updated to check the DriveBase file's own shape instead, each with a
+  comment saying why — not deleted, since the recorded format's own tests
+  (`test_hub_module.py`, `test_drive_module.py`, `test_drive_program.py`)
+  were never routed through `build_run` and keep passing unchanged.
+
+  **Verified in the browser** (`npm run dev` still cannot start Pyodide —
+  pre-existing, step 2's own note; built the wheel, slimmed it, `npm run
+  build`, served the `dist/` with `vite preview`): Pyodide started in
+  Chrome, `build_run` returned no console errors, and for the autosaved
+  template run (five steps, the "Team robot" profile, which carries its
+  own DriveBase numbers): the field, steps and 1 problem (the table
+  overhang) drew as before; the readout read **"7 moves, 0.6KB on the
+  hub"**; the clock read **"0.0s / ~15.6s"** and the run line read
+  **"run (estimate): ~15.6s, 1 problem"**; **Download .py** was enabled;
+  and opening the Python panel showed the whole generated file — docstring,
+  `core.configure(...)` with the profile's own numbers, every
+  `drive.straight`/`core.turn_to`/`wait` call, `core.stopTaskMotors()` —
+  with no `DATA`, no elision, and the panel's own text reading "the whole
+  file above". **Not checked in the browser:** the "no DriveBase numbers of
+  its own" warning reaching the panel for a run with no profile — the page's
+  own robot picker only offers named profiles (5.3), which always carry
+  `driveBase` numbers, so that path was not reachable by hand without
+  editing a profile out of Firestore. It is covered directly in Python
+  (`test_headless.py`, `test_drive_module.py`) instead. No Save or
+  save-remote button was clicked, so nothing reached the team's Firestore;
+  the preview server was stopped afterwards.
+
+  **Left for the robot session above:** confirming any of this against real
+  firmware — nothing here touched `pythfinder/Export/driveModule.py`,
+  `driveProgram.py`, or the quick-start repo's own hub-side code (5.6),
+  which is where that confirmation has to happen.
+
 - [ ] **5.8 Retire the recorded format.** Once 5.7's robot session has
   passed and no run on the hub imports `Trajectory`: decide whether `hubModule.py` and the hub's `trajectory.py`
   go, or stay for a future spline step. Nothing else depends on them.
@@ -2225,8 +2344,10 @@ Decide when we reach the step named. The recommendation is the default.
   worker has cached around it. Worth deciding how long sessions last before the
   kids meet it mid-practice.
 - **Hub heap.** Each run is roughly 6 bytes per exported state (about 16 KB for
-  the template run). Several long runs in one program add up, hence 4.6 —
-  and phase 5, which removes the recorded data altogether.
+  the template run) in the recorded format. Several long runs in one program
+  add up, hence 4.6 — struck once phase 5 removed the recorded data
+  altogether (step 5.7): a DriveBase file costs a few hundred bytes, not
+  kilobytes, so this risk is retired along with 4.6, not just mitigated.
 - **`DriveBase` turns out less repeatable than the follow loop.** Unlikely,
   since it closes the loop on distance and the follow loop does not, but it is
   the premise of phase 5, so 5.1 measures it before anything is built.

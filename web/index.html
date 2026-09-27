@@ -322,13 +322,20 @@
           <button id="play" type="button" title="play the run (space)">▶</button>
           <input id="scrub" type="range" min="0" max="100" step="10" value="0"
                  title="scrub through the run" />
-          <span class="clock"><b id="now">0.0s</b> / <b id="total">—</b></span>
+          <!-- step 5.7: the firmware picks its own acceleration now, so the
+               run's length on screen is an estimate, not a promise -- see
+               the title on both readouts below. -->
+          <span class="clock" title="an estimate -- the firmware picks its own acceleration now">
+            <b id="now">0.0s</b> / <b id="total">—</b>
+          </span>
         </div>
 
         <div class="readout">
           <span>start: <b id="pose">—</b></span>
           <span>mouse: <b id="mouse">—</b></span>
-          <span>run: <b id="run">—</b></span>
+          <span title="an estimate -- the firmware picks its own acceleration now">
+            run (estimate): <b id="run">—</b>
+          </span>
         </div>
         <div class="readout">
           <span>at this moment: <b id="atstep">—</b></span>
@@ -351,7 +358,7 @@
         <details id="python" class="spaced">
           <summary>Python</summary>
           <p class="pysub">
-            Read-only. The code half of the file above, and the equivalent
+            Read-only. The whole file above, and the equivalent
             <code>TrajectoryBuilder</code> chain for
             <code>fll_run_template.py</code>'s own simulator.
           </p>

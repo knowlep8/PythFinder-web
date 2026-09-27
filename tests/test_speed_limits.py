@@ -206,16 +206,18 @@ def test_the_chain_note_is_absent_without_a_speed_limit():
     assert "needs:" not in result["builder_source"]
 
 
-def test_a_speed_limit_reaches_the_hub_file_as_slower_numbers_only():
-    """A speed limit changes the DATA payload's own numbers -- the wheel
-    speeds baked in -- and adds no code of its own to the hub file. Nothing
-    in module_text should even hint a limit was involved."""
+def test_a_speed_limit_reaches_the_hub_file_as_a_settings_change():
+    """Step 5.7: build_run's module_text is the DriveBase file now, which
+    (unlike the recorded format, where a limit only changed the wheel speeds
+    baked into DATA) writes a real drive.settings(...) call at each edge --
+    driveProgram.py/driveModule.py already prove that thoroughly on their
+    own (test_drive_program.py, test_drive_module.py); what matters here is
+    only that build_run's own wiring hands the same file over."""
     result = build([drive(80, [limit(30, 60, cm_s=10)])])
 
     assert result["ok"], result["diagnostics"]
     assert result["module_text"] is not None
-    assert "MARKERS = ()" in result["module_text"]
-    assert result["code_text"] is not None
+    assert "drive.settings(straight_speed=100)" in result["module_text"]
 
 
 def test_a_bare_step_with_no_speed_limits_is_unaffected():

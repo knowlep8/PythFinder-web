@@ -101,4 +101,7 @@ def test_the_generated_file_binds_an_action_at_the_start():
 
     assert result["ok"], result["diagnostics"]
     assert "core.leftTask.run(500)" in result["module_text"]
-    assert "_action_1(core)," in result["module_text"]
+    # step 5.7: module_text is the DriveBase file now, which calls
+    # _action_1(core) inline in run() rather than binding it into a tuple of
+    # lambdas (withMarkers) -- no trailing comma to check for any more.
+    assert "_action_1(core)" in result["module_text"]

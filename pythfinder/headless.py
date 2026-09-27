@@ -11,13 +11,22 @@ everything needed to draw it, complain about it, and download it:
       "markers": [ {"id": "a1", "step": 0, "time_ms": 1764}, ... ],
       "diagnostics": [ {"level": "warning", "message": ..., "step": 1, ...} ],
       "module_text": "<the .py file to save and upload to the hub>",
-      "code_text": "<the same file, its DATA payload elided -- for reading>",
       "builder_source": "<the equivalent TrajectoryBuilder chain, for the desktop tool>"
     }
 
 Nothing here raises for a badly described run: a run a child typed wrong is
 ordinary, not exceptional, so problems come back as diagnostics next to the
 step that caused them.
+
+Step 5.7: "module_text" is the DriveBase file (driveModule.py, steps 5.4/5.5)
+-- straight(), turn_to(), wait() and the run's own actions, a few hundred
+bytes of readable Python -- not the older recording of wheel powers every few
+milliseconds (hubModule.py). That format stays in the library for a run
+already on the hub; this function just stops handing it out. A diagnostic
+that belongs to the run as a whole rather than any one step (today, only "no
+DriveBase numbers of its own") is folded into "diagnostics" above with
+step: None; see build_run's own body for why a *step*-specific one from the
+move-list compiler is not folded in the same way.
 
 The run description looks like this:
 
@@ -138,6 +147,14 @@ def pose_from_description(description) -> Pose:
 
 def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
     """Turn a described run into something to draw, check and download."""
+    # Imported here, not at module level: driveProgram.py imports STEP_TYPES,
+    # _arm_command and pose_from_description back out of *this* module, so an
+    # import at the top would be a cycle that fails while headless.py is
+    # still executing its own top-level statements. By the time build_run is
+    # actually called, headless.py has finished loading and the cycle
+    # resolves fine.
+    from pythfinder.Export.driveModule import drive_module_text
+
     diagnostics = []
 
     name = run.get("name", "trajectory")
@@ -162,7 +179,6 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
     # merged into one segment, so a later step may add to an earlier segment.
     segment_owner = []
     action_steps = {}
-    action_code = {}
 
     # How far into the current run of merged steps we are: milliseconds for
     # waits, centimetres for drives.
@@ -234,11 +250,6 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
             if _add_action(builder, dict(action, at = at), index, diagnostics):
                 action_steps[action.get("id")] = index
 
-                if action.get("do") is not None:
-                    action_code[action.get("id")] = action["do"]
-                elif kind == "armStep":
-                    action_code[action.get("id")] = _arm_command(step)
-
             marker_line = _chain_marker_line(action, at)
 
             if marker_line is not None:
@@ -264,24 +275,49 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
         problem.step = _described_step(problem.step, segment_owner)
         diagnostics.append(problem)
 
-    # in the order they fire, which is the order the hub binds them -- not the
-    # order the steps were written
-    firing_order = [dict(action_code.get(marker.function, {}),
-                         id = marker.function,
-                         label = _label_for(marker.function, steps))
-                    for marker in trajectory.MARKERS]
+    ok = not any(problem.is_error() for problem in diagnostics)
 
-    module_text = _hub_module(trajectory, name, steps_ms, diagnostics,
-                              firing_order)
+    # Step 5.7: the file to hand over is no longer this trajectory's own
+    # recorded-powers rendering (hubModule.py) -- it is the DriveBase move
+    # list compiled straight from the run description (driveProgram.py /
+    # driveModule.py, steps 5.4/5.5). hubModule.py and the hub's recorded
+    # trajectory.py both stay in the library -- a run already on the hub can
+    # still import Trajectory, and step 5.8 decides whether that ever goes
+    # away -- this function just stops handing that format out.
+    drive_result = drive_module_text(run)
 
-    # only when the real file built: nothing legitimate to elide the payload
-    # from otherwise, and _hub_module already recorded why
-    code_text = (_hub_module_code(trajectory, name, steps_ms, firing_order)
-                if module_text is not None else None)
+    if ok and not drive_result["ok"]:
+        # A shape the loop above thought was fine, but the drive compiler
+        # alone refuses. Rare -- step 5.2 unified the placement rules the two
+        # enforce -- but a hand-edited or pre-5.2 saved run can still reach
+        # one, and every diagnostic here is genuinely new, so all of them are
+        # kept, against whichever step compile_drive_program itself named.
+        new_diagnostics = drive_result["diagnostics"]
+    else:
+        # Otherwise, fold in only the run-wide ones -- there is only one
+        # today, "no DriveBase numbers of its own". A *step*-specific one
+        # here would very likely just be the loop above's own problem
+        # again, in different words and quite possibly against a different
+        # step number: compile_drive_program does not know which steps
+        # TrajectoryBuilder merged into one acceleration profile, so it
+        # checks each described step's own placement on its own, not the
+        # merged segment's -- see docs/web-planner.md, step 5.4. Showing
+        # both would tell a team member the same mistake twice, worded two
+        # different ways, on two different steps.
+        new_diagnostics = [raw for raw in drive_result["diagnostics"]
+                           if raw["step"] is None]
+
+    for raw in new_diagnostics:
+        diagnostics.append(Diagnostic(level = raw["level"], message = raw["message"],
+                                      step = raw["step"], suggestion = raw["suggestion"],
+                                      time_ms = raw["time_ms"]))
+
+    ok = ok and drive_result["ok"]
+    module_text = drive_result["module_text"] if drive_result["ok"] else None
 
     return {"version": VERSION,
             "name": name,
-            "ok": not any(problem.is_error() for problem in diagnostics),
+            "ok": ok,
             "total_ms": trajectory.TIME,
             "steps": _step_times(builder, segment_owner, steps),
             "poses": _poses(trajectory, pose_every_ms),
@@ -292,11 +328,11 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
                          "time_ms": marker.time}
                         for marker in trajectory.MARKERS],
             "diagnostics": [problem.as_dict() for problem in diagnostics],
+            # the DriveBase file to save -- see the note above
             "module_text": module_text,
-            # step 3.4: the same file with its payload elided, and the
-            # TrajectoryBuilder chain it is equivalent to -- both read-only,
-            # neither needed to drive the robot
-            "code_text": code_text,
+            # step 3.4: the equivalent TrajectoryBuilder chain, for the
+            # desktop tool's own simulator -- read-only, not needed to drive
+            # the robot
             "builder_source": builder_source}
 
 
@@ -802,19 +838,6 @@ def _add_speed_limit(builder: TrajectoryBuilder, step: dict, spec: dict, index: 
     return _chain_speed_limit_lines(resolved_from, resolved_to, cm_s)
 
 
-def _hub_module_code(trajectory, name: str, steps_ms: int, actions: list = None):
-    """The learning half of step 3.4 -- see hub_module_code_text."""
-    if trajectory.TIME <= 0:
-        return None
-
-    try:
-        return trajectory.hub_module_code(name, steps_ms, actions)
-
-    except ValueError:
-        # _hub_module already recorded the real diagnostic for this trajectory
-        return None
-
-
 def _described_step(segment_index, segment_owner):
     """Translate a builder segment number back into a described step number."""
     if segment_index is None:
@@ -876,36 +899,6 @@ def _step_times(builder, segment_owner: list, steps: list) -> list:
     return timed
 
 
-def _label_for(identifier, steps: list) -> str:
-    """What the team called this action, for the comment in the file."""
-    for step in steps:
-        if not isinstance(step, dict):
-            continue
-
-        for action in step.get("actions", []):
-            if action.get("id") == identifier:
-                return action.get("label") or identifier
-
-    return identifier if identifier is not None else "action"
-
-
-def _hub_module(trajectory, name: str, steps_ms: int, diagnostics: list,
-                actions: list = None):
-    if trajectory.TIME <= 0:
-        return None
-
-    try:
-        return trajectory.hub_module(name, steps_ms, actions)
-
-    except ValueError as problem:
-        # a speed too large for the hub's format, or a robot that is not a
-        # tank drive. Either way there is no file to hand over
-        diagnostics.append(Diagnostic.error(
-            "this run cannot be sent to the hub: {0}".format(problem)))
-
-        return None
-
-
 def _poses(trajectory, every_ms: int) -> list:
     states = trajectory.STATES
 
@@ -934,5 +927,4 @@ def _nothing_to_drive(name: str, diagnostics: list) -> dict:
             "markers": [],
             "diagnostics": [problem.as_dict() for problem in diagnostics],
             "module_text": None,
-            "code_text": None,
             "builder_source": None}

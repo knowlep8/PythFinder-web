@@ -449,10 +449,10 @@ async function main() {
       return;
     }
 
-    const { states, bytes } = hubCost(module);
+    const { moves, bytes } = hubCost(module);
 
     costReadout.textContent =
-      `${states} states, ${(bytes / 1024).toFixed(1)}KB on the hub`;
+      `${moves} move${moves === 1 ? "" : "s"}, ${(bytes / 1024).toFixed(1)}KB on the hub`;
   }
 
   function rebuild() {
@@ -638,20 +638,25 @@ async function main() {
     applyHighlight();
 
     scrub.max = String(result.total_ms);
-    totalReadout.textContent = seconds(result.total_ms);
+    // step 5.7: an estimate, not a promise -- the firmware picks its own
+    // acceleration now, so "~" carries that at a glance; the clock's own
+    // title spells it out for anyone who hovers.
+    totalReadout.textContent = "~" + seconds(result.total_ms);
     playback.setDuration(result.total_ms);
     showSaveState();
 
-    // step 3.4: read-only, so textContent is enough -- nothing here is typed into
-    codeView.textContent = result.code_text ?? "nothing to run yet";
+    // step 3.4: read-only, so textContent is enough -- nothing here is typed
+    // into. Step 5.7: module_text elides nothing any more, so the Python
+    // view reads the same field the download button saves.
+    codeView.textContent = result.module_text ?? "nothing to run yet";
     chainView.textContent = result.builder_source ?? "nothing to run yet";
-    copyCodeButton.disabled = result.code_text === null;
+    copyCodeButton.disabled = result.module_text === null;
     copyChainButton.disabled = result.builder_source === null;
 
     const trouble = result.diagnostics.length;
 
     runReadout.textContent =
-      seconds(result.total_ms) +
+      "~" + seconds(result.total_ms) +
       (trouble > 0 ? `, ${trouble} problem${trouble > 1 ? "s" : ""}` : "");
 
     output.textContent = "";

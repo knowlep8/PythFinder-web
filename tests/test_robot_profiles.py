@@ -49,24 +49,32 @@ TEAM_PROFILE = {
 }
 
 
-def body(module_text):
-    """Everything but the opening docstring line, which names the source."""
-    return module_text.split("\n", 1)[1]
-
-
 def test_a_named_profile_plans_the_same_run_as_fll_team():
-    """The team's own numbers, just nested under "planning" now."""
+    """The team's own numbers, just nested under "planning" now.
+
+    Step 5.7 wired the DriveBase numbers into module_text itself (core.
+    configure(...) is written from them, and the "no DriveBase numbers of
+    its own" warning goes away) -- so a profile's own file is no longer
+    identical to "fll_team"'s the way it was before 5.5 existed. What this
+    test is actually about -- the *planning* numbers under "planning" being
+    read the same way whichever shape they arrive in -- is the path and
+    timing, not the download, so that is what is compared now.
+    """
     run = dict(TEMPLATE_RUN)
     run["robot"] = TEAM_PROFILE
 
     result = build_run(run)
+    plain = build_run(TEMPLATE_RUN)
 
     assert result["ok"]
-    assert body(result["module_text"]) == body(build_run(TEMPLATE_RUN)["module_text"])
+    assert result["total_ms"] == plain["total_ms"]
+    assert result["poses"] == plain["poses"]
 
 
 def test_driveBase_numbers_are_ignored_for_planning():
-    """5.5/5.6's job, not this one -- changing them must change nothing here."""
+    """5.4/5.6's job, not this one -- changing them must change the planned
+    path not at all, even though (since step 5.7) they do change the
+    download's own core.configure(...) line."""
     tuned = dict(TEAM_PROFILE)
     tuned["driveBase"] = dict(TEAM_PROFILE["driveBase"],
                               wheel_diameter_mm = 62.4,
@@ -77,9 +85,11 @@ def test_driveBase_numbers_are_ignored_for_planning():
     run["robot"] = tuned
 
     result = build_run(run)
+    untuned = build_run(dict(TEMPLATE_RUN, robot = TEAM_PROFILE))
 
     assert result["ok"]
-    assert body(result["module_text"]) == body(build_run(TEMPLATE_RUN)["module_text"])
+    assert result["total_ms"] == untuned["total_ms"]
+    assert result["poses"] == untuned["poses"]
 
 
 def test_a_named_profile_with_no_planning_key_is_still_rejected():

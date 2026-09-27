@@ -22,6 +22,9 @@ from pathlib import Path
 
 import pytest
 
+from pythfinder import Pose, TrajectoryBuilder
+from pythfinder.Trajectory.robotConfig import FLL_ROBOT
+
 from golden_runs import GOLDEN_DIR, GOLDEN_RUNS
 
 
@@ -59,6 +62,43 @@ def test_reports_the_counts_the_hub_needs():
     assert "STEPS = 6" in text
     assert "MARKERS = (1764, 7942)" in text
     assert "COUNT = 2607" in text
+
+
+def test_hub_module_code_elides_the_payload_but_keeps_everything_else():
+    """Step 3.4's own "learning" view of this format -- moved here from
+    test_python_view.py when step 5.7 switched build_run's own module_text
+    over to the DriveBase file: hub_module_code is still a public method on
+    Trajectory, and this is the only place its elision is checked now.
+    """
+    trajectory = (TrajectoryBuilder(Pose(x = 0, y = 0, head = 0), robot = FLL_ROBOT)
+                 .inLineCM(40)
+                 .addRelativeDisplacementMarker(0, "a1")
+                 .build())
+
+    actions = [{"id": "a1", "label": "Grab", "motor": "leftTask",
+               "call": "run", "speed": 500}]
+
+    module = trajectory.hub_module("run_a", 6, actions)
+    code = trajectory.hub_module_code("run_a", 6, actions)
+
+    # the structural "DATA = (...)" wrapper is deliberately kept -- only the
+    # bytes literal inside it is elided
+    assert "DATA = (\n" in code
+    assert "b'" not in code, "the payload bytes themselves must not be there"
+    assert "elided" in code
+    assert "def _action_1(core):" in code
+    assert "def run(core):" in code
+
+    # everything that is not the payload must match the real file exactly --
+    # this can never drift, because both come from the same _module_text.
+    # rsplit rather than split: the closing "\n)\n" is the template's own,
+    # and only the last occurrence is guaranteed to be it
+    assert module.split("DATA = (")[0] == code.split("DATA = (")[0]
+    assert module.rsplit("\n)\n", 1)[-1] == code.rsplit("\n)\n", 1)[-1], (
+        "the action defs and run() must be identical")
+
+    # a sanity check that the elision actually elided something
+    assert len(code) < len(module) / 2
 
 
 @pytest.mark.parametrize("name", sorted(GOLDEN_RUNS))

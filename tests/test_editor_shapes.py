@@ -77,7 +77,14 @@ def test_both_kinds_in_one_run_come_back_in_firing_order():
     assert [marker["id"] for marker in result["markers"]] == ["a2", "a3"]
 
     module = result["module_text"]
-    assert module.index("_action_1(core),") < module.index("_action_2(core),")
+    # step 5.7: a parallel action becomes a numbered _action_N(core), called
+    # inline from run() (no comma -- it is not bound into a tuple of lambdas
+    # any more), but an arm step's own call is inlined under its label
+    # instead of getting a function of its own (see driveModule.py's
+    # _arm_lines) -- so "firing order" here means the parallel action's line
+    # comes before the arm step's own guarded call, in the order both
+    # actually run.
+    assert module.index("_action_1(core)") < module.index("core.leftTask.run_angle")
 
 
 def test_an_arm_step_with_no_action_still_drives():

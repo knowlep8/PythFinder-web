@@ -8,9 +8,8 @@ a child typing a wrong number is ordinary, not exceptional.
 
 import pytest
 
+from pythfinder.Export.driveModule import drive_module_text
 from pythfinder.headless import build_run
-
-from golden_runs import GOLDEN_DIR, GOLDEN_RUNS
 
 
 TEMPLATE_RUN = {
@@ -41,94 +40,48 @@ def body(module_text):
     return module_text.split("\n", 1)[1]
 
 
-def data_only(module_text):
-    """Just the numbers the robot drives on.
-
-    Picked out by name rather than by cutting the file at the first `def` or
-    `from`: the generated module puts `from trajectory import Trajectory`
-    directly under its docstring, so cutting there left nothing but the
-    docstring on one side and the whole file on the other.
-
-    The docstring itself is excluded on purpose -- the fixture was written by
-    tools/txt_to_py.py and says so, while ours says PythFinder.
-    """
-    keep = ("STEPS", "MARKERS", "COUNT", "DATA")
-    lines = module_text.split("\n")
-
-    return "\n".join(
-        line for line in lines
-        if line.startswith(keep) or line.startswith("    b")
-    )
-
-
-def motion_only(module_text):
-    """Just the states the robot drives on -- not MARKERS.
-
-    Step 5.2 removed time placement, so TEMPLATE_RUN's "arm up" action moved
-    from {"ms": -1} to {"cm": -1} -- see TEMPLATE_RUN's own comment. That is
-    a different moment (7673ms into the run, not 7942), so MARKERS no longer
-    matches the pinned hub file byte for byte; the motion itself does not
-    depend on where a marker sits, so STEPS/COUNT/DATA still should. The
-    byte-for-byte proof of MARKERS against that same file lives on
-    unaffected in test_hub_module.py, built through golden_runs.py's own
-    TrajectoryBuilder chain -- which still places that action with
-    .addRelativeTemporalMarker(-1, ...), a call this format no longer
-    exposes but the library itself still has.
-    """
-    keep = ("STEPS", "COUNT", "DATA")
-    lines = module_text.split("\n")
-
-    return "\n".join(
-        line for line in lines
-        if line.startswith(keep) or line.startswith("    b")
-    )
-
-
-def test_the_template_run_described_as_data_gives_the_golden_file():
+def test_the_template_run_downloads_as_the_driveBase_program():
     """The same run the team drives, described as JSON instead of Python.
 
-    Compared on the motion alone -- not the full data_only() block this test
-    used to check byte for byte. The file on the hub predates step 3.2, which
-    adds the attachment motor code and a run() below the constants, so the
-    numbers the robot *drives on* (STEPS/COUNT/DATA) must still match it
-    exactly; the code section is new and is checked separately.
-
-    MARKERS is deliberately excluded now. The hub file's second marker was
-    placed with a temporal trigger ({"ms": -1}, "1ms before the end") that
-    step 5.2 removed from the run-description format; TEMPLATE_RUN's
-    equivalent is now {"cm": -1}, which lands at a different, but equally
-    valid, moment (see TEMPLATE_RUN's own comment and motion_only's). The
-    byte-for-byte MARKERS proof against this same golden file still lives at
-    the library level, in test_hub_module.py, built through golden_runs.py's
-    TrajectoryBuilder chain -- a path this format change does not touch.
+    Step 5.7: build_run's own module_text is the DriveBase file now
+    (driveProgram.py / driveModule.py), not the recorded-powers rendering
+    this test used to check byte for byte against the file on the hub --
+    that comparison lives on unaffected in test_hub_module.py, built through
+    golden_runs.py's own TrajectoryBuilder chain, a path this change does
+    not touch at all. What is worth pinning here is that build_run's own
+    wiring hands over *exactly* what drive_module_text produces for the
+    same run -- pinned as its own snapshot in test_drive_module.py -- rather
+    than a second rendering of it that could quietly drift away.
     """
     result = build_run(TEMPLATE_RUN)
 
-    assert result["ok"]
+    assert result["ok"], result["diagnostics"]
     assert result["total_ms"] == 15641
+    assert result["module_text"] == drive_module_text(TEMPLATE_RUN)["module_text"]
 
-    on_the_hub = (GOLDEN_DIR / "hub" / "template_run.py").read_text()
-    assert motion_only(result["module_text"]) == motion_only(on_the_hub)
-
-    # the marker moved, but is still there, still ordered second, and still
-    # lands inside the step it belongs to
+    # the marker is still there, still ordered second, and still lands
+    # inside the step it belongs to
     assert [m["id"] for m in result["markers"]] == ["arm_down", "arm_up"]
     assert result["markers"][1]["time_ms"] < result["total_ms"]
 
 
 def test_the_template_run_now_carries_its_own_code():
-    """What 3.2 adds on top: the actions, and a run() to bind them."""
+    """What 3.2 adds on top: the actions, and a run() to bind them.
+
+    Step 5.7: no "from trajectory import Trajectory" any more -- the
+    DriveBase file never imports it -- and the actions are called inline
+    from run(), not bound into a tuple of lambdas, so there is no trailing
+    comma to look for.
+    """
     module = build_run(TEMPLATE_RUN)["module_text"]
 
-    assert "from trajectory import Trajectory" in module
     assert "def _action_1(core):" in module
     assert "def _action_2(core):" in module
     assert "def run(core):" in module
 
-    # bound in firing order, which is what makes the tuple in runs.py
-    # unnecessary
-    first = module.index("_action_1(core),")
-    second = module.index("_action_2(core),")
+    # called in firing order
+    first = module.index("_action_1(core)")
+    second = module.index("_action_2(core)")
     assert first < second
 
 
@@ -160,12 +113,16 @@ def test_a_run_with_no_actions_still_gets_a_run_function():
 
     module = build_run(run)["module_text"]
 
-    assert "from trajectory import Trajectory" in module
+    # step 5.7: the DriveBase file never imports Trajectory or calls
+    # follow() -- run() drives the DriveBase directly -- but the property
+    # this test is actually about still holds: a plain run with nothing
+    # attached still gets a complete, callable run().
     assert "def run(core):" in module
-    assert "trajectory.follow(core)" in module
+    assert "drive.straight(" in module
+    assert "core.stopTaskMotors()" in module
 
-    # nothing to bind, so nothing here should even mention it
-    assert "withMarkers" not in module
+    # nothing to bind, so nothing here should even mention an action
+    assert "_action_" not in module
 
 
 def test_the_template_run_overhangs_the_table_while_turning_home():
@@ -178,11 +135,17 @@ def test_the_template_run_overhangs_the_table_while_turning_home():
     """
     result = build_run(TEMPLATE_RUN)
 
-    assert [problem["level"] for problem in result["diagnostics"]] == ["warning"]
+    # every problem here is a warning, not an error -- the run still works.
+    # There are two now, not one: TEMPLATE_RUN's "fll_team" robot carries no
+    # DriveBase numbers of its own (step 5.7), which is a second, run-wide
+    # warning riding alongside the table overhang.
+    assert [problem["level"] for problem in result["diagnostics"]] == \
+        ["warning", "warning"]
 
-    overhang = result["diagnostics"][0]
+    overhangs = [d for d in result["diagnostics"] if "table" in d["message"]]
+    assert len(overhangs) == 1
 
-    assert "table" in overhang["message"]
+    overhang = overhangs[0]
     assert overhang["step"] == 4              # the drive back to the start
     assert overhang["time_ms"] > 0
 
@@ -313,8 +276,11 @@ def test_problems_point_at_the_described_step_not_the_merged_one():
 
     result = build_run(run)
 
+    # filtered by message, not just level == "warning": step 5.7 always adds
+    # a second, run-wide warning here too ("fll_team" carries no DriveBase
+    # numbers of its own), which is not what this test is about
     dropped = [problem for problem in result["diagnostics"]
-               if problem["level"] == "warning"]
+               if "dropped" in problem["message"]]
 
     assert len(dropped) == 1
     assert dropped[0]["step"] == 0    # both drives are one segment, the first
@@ -435,7 +401,11 @@ def test_a_turn_action_at_its_start_fires_with_no_warning():
 
     assert result["ok"], result["diagnostics"]
     assert [m["id"] for m in result["markers"]] == ["a1"]
-    assert result["diagnostics"] == []
+
+    # nothing about the turn action itself -- the only diagnostic left is
+    # the run-wide one every "fll_team" run gets now (step 5.7: no DriveBase
+    # numbers of its own), which is not what this test is about
+    assert [d["step"] for d in result["diagnostics"]] == [None]
 
 
 def test_a_turn_action_off_its_start_still_fires_but_warns():
@@ -449,10 +419,13 @@ def test_a_turn_action_off_its_start_still_fires_but_warns():
     assert result["ok"]
     assert [m["id"] for m in result["markers"]] == ["a1"]
 
-    warnings = [d for d in result["diagnostics"] if d["level"] == "warning"]
+    # filtered by message, not just level == "warning": step 5.7 always adds
+    # a second, run-wide warning here too ("fll_team" carries no DriveBase
+    # numbers of its own), which is not what this test is about
+    warnings = [d for d in result["diagnostics"]
+               if "only ever fires at its start" in d["message"]]
     assert len(warnings) == 1
     assert warnings[0]["step"] == 0
-    assert "only ever fires at its start" in warnings[0]["message"]
     assert warnings[0]["suggestion"] == "move it to the next step"
 
 

@@ -148,6 +148,8 @@ def test_a_code_action_and_a_motor_action_fire_in_order_together():
     assert [marker["id"] for marker in result["markers"]] == ["motor", "code"]
 
     module = result["module_text"]
-    assert module.index("_action_1(core),") < module.index("_action_2(core),")
+    # step 5.7: run() calls each action inline, not from a bound tuple of
+    # lambdas, so there is no trailing comma to look for any more.
+    assert module.index("_action_1(core)") < module.index("_action_2(core)")
     assert "core.leftTask.run(500)" in module
     assert "core.rightTask.stop()" in module

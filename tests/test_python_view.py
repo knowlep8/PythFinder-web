@@ -1,9 +1,7 @@
 """Step 3.4: two read-only views of what a run already computed.
 
 `builder_source` is the TrajectoryBuilder chain this run is equivalent to, for
-pasting into fll_run_template.py's own build(sim). `code_text` is the same
-file the hub gets, with its DATA payload -- thousands of bytes nobody can
-read -- elided.
+pasting into fll_run_template.py's own build(sim).
 
 The one property that actually matters for `builder_source`: it has to be
 *runnable*, not just plausible-looking text. A chain that reads correctly but
@@ -12,6 +10,16 @@ step 3.2 spent a session fixing, just one layer further from the tests that
 would catch it. So the tests below don't just check the text -- they exec()
 it, through the real TrajectoryBuilder, and compare what it built against what
 build_run itself built for the identical steps.
+
+Until step 5.7, this file also covered `code_text` -- the same file the hub
+gets, with its DATA payload elided, since that payload was thousands of bytes
+nobody could read. Step 5.7 replaced module_text with the DriveBase file
+(driveModule.py), which has no such payload to elide -- the whole thing is
+already readable Python -- so build_run no longer returns a second, elided
+copy of it at all, and this file no longer tests one. The recorded format's
+own elision (`Trajectory.hub_module_code`) is a real library feature still,
+just no longer reached through build_run -- its coverage moved to
+test_hub_module.py, called directly.
 """
 
 from pythfinder import Point, Pose, TrajectoryBuilder
@@ -157,7 +165,15 @@ def test_an_empty_run_still_has_a_pasteable_chain():
     assert trajectory.TIME == 0
 
 
-def test_code_text_elides_the_payload_but_keeps_everything_else():
+def test_module_text_elides_nothing_any_more():
+    """Step 5.7's whole point for this view: nothing is hidden now.
+
+    The elision this file used to check (test_code_text_elides_the_payload...,
+    removed) was only ever there to hide DATA -- thousands of bytes nobody
+    could read. The DriveBase file has no such payload, so module_text is
+    now exactly what both the download and the Python view show: a short,
+    fully readable file, actions included.
+    """
     result = build([{"type": "drive", "cm": 40, "actions": [
         {"id": "a1", "at": {"cm": 0}, "label": "Grab",
          "do": {"motor": "leftTask", "call": "run", "speed": 500}}]}])
@@ -165,31 +181,12 @@ def test_code_text_elides_the_payload_but_keeps_everything_else():
     assert result["ok"], result["diagnostics"]
 
     module = result["module_text"]
-    code = result["code_text"]
 
-    assert code is not None
-    # the structural "DATA = (...)" wrapper is deliberately kept -- only the
-    # bytes literal inside it is elided
-    assert "DATA = (\n" in code
-    assert "b'" not in code, "the payload bytes themselves must not be there"
-    assert "elided" in code
-    assert "def _action_1(core):" in code
-    assert "def run(core):" in code
-
-    # everything that is not the payload must match the real file exactly --
-    # this can never drift, because both come from the same _module_text.
-    # rsplit rather than split: the closing "\n)\n" is the template's own,
-    # and only the last occurrence is guaranteed to be it
-    assert module.split("DATA = (")[0] == code.split("DATA = (")[0]
-    assert module.rsplit("\n)\n", 1)[-1] == code.rsplit("\n)\n", 1)[-1], (
-        "the action defs and run() must be identical")
-
-
-def test_code_text_is_much_smaller_than_the_real_file():
-    """A sanity check that the elision actually elided something."""
-    result = build([{"type": "drive", "cm": 400}])   # a long run, lots of DATA
-
-    assert len(result["code_text"]) < len(result["module_text"]) / 4
+    assert "DATA" not in module
+    assert "elided" not in module
+    assert "def _action_1(core):" in module
+    assert "def run(core):" in module
+    assert len(module) < 1000   # "a few hundred bytes", not kilobytes
 
 
 def test_both_views_are_none_when_there_is_nothing_to_drive():
@@ -200,5 +197,4 @@ def test_both_views_are_none_when_there_is_nothing_to_drive():
     })
 
     assert result["module_text"] is None
-    assert result["code_text"] is None
     assert result["builder_source"] is None
