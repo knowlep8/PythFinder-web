@@ -1286,7 +1286,9 @@ Order these after watching the kids use phase 3.
   marker on the field, not only the other way round.
 - [ ] **4.2** Robot settings panel (track width, max velocity, centre offset,
   speed limits, sprite), behind a simple mentor toggle.
+  *Superseded by 5.3: several named robot profiles, addable by anyone.*
 - [ ] **4.3** Launch-area presets and snapping for the start pose.
+  *Superseded by 5.3: named start positions, addable from the field.*
 - [ ] **4.4** Overlay several runs at once, to check they do not collide with
   each other's missions.
 - [x] **4.5** Speed-limit (constraints marker) blocks for slow, careful
@@ -1353,11 +1355,205 @@ Order these after watching the kids use phase 3.
   chain-execution checks above; 146 pass in total, the one known xfail
   unchanged.
 - [ ] **4.6** Hub memory budget: total bytes across all runs in the selector.
+  *Likely unnecessary after phase 5, which shrinks a run to a few hundred
+  bytes. Hold until 5.1 says whether phase 5 goes ahead.*
 - [ ] **4.7** *(stretch)* Send straight to the hub over Web Bluetooth, the way
   code.pybricks.com does. Needs the secure context from 2.1.
 - [ ] **4.8** Sharpen the offline story: check what actually survives a
   competition venue with no route to the host, and whether the service worker
   from 2.9 covers it.
+
+---
+
+## Phase 5 — drive with Pybricks' DriveBase, not recorded powers
+
+**Why.** The hub file today is a recording: wheel powers and a target heading
+every 6 ms, played back against the clock by `trajectory.py`'s follow loop.
+Two problems with that, one measured and one structural:
+
+- **Memory.** 6 bytes per state, ~15 KB for `run_a`'s 15.6 s, and every run
+  imported by `runs.py` stays on the heap for the whole match — up to ~150 KB
+  if the robot drove the full 2.5 minutes. Each run is also one contiguous
+  allocation, so fragmentation can fail an import with room to spare overall.
+- **No distance feedback.** The follow loop indexes by *time* and corrects only
+  *heading*. Nothing checks how far the robot has gone, so battery level, slip
+  or a heavier attachment turn directly into overshoot or undershoot, and it
+  accumulates along the run.
+
+Pybricks' `DriveBase` runs its motion control in firmware, closes the loop on
+the wheel encoders for distance and (with `use_gyro(True)`) on the IMU for
+heading, and a run expressed as its calls costs a few dozen bytes per move.
+
+**Why it fits exactly.** Nothing the planner can build today is a curve.
+`inSpline` is commented out (`trajectoryBuilder.py:127`), and on a tank drive
+`PointSegment` and `PoseSegment` force `tangent = True, linear_head = False`,
+so every step is already straight lines and turns in place:
+
+| Step | Built today as | DriveBase equivalent |
+|---|---|---|
+| `drive` | `inLineCM` | `straight(mm)` |
+| `turn` | `turnToDeg` (absolute heading) | `turn_to(deg)` — see 5.6 |
+| `toPoint` | turn to face, straight | `turn_to`, `straight` |
+| `toPose` | turn to face, straight, turn | `turn_to`, `straight`, `turn_to` |
+| `wait` | `wait` | `wait(ms)` |
+| `armStep` | `wait` + marker | the arm call itself, with `wait=True` |
+
+**Why dropping timed triggers matters.** With actions placed only by distance,
+an action inside a drive is just a split point — no polling loop, no
+multitasking, nothing timed on the hub:
+
+```python
+db.straight(250, then=Stop.NONE)   # keeps rolling, no slow-down
+_action_1(core)                    # starts the arm, returns at once
+db.straight(170)
+```
+
+The editor already offers only "cm in" for actions and speed limits; `ms`
+placement survives only in the run format and `build_run`. **Decided
+2026-09-27: timed triggers are removed.**
+
+What this gives up, knowingly: the planner's run time becomes an estimate
+(the firmware picks its own acceleration), and an action can no longer fire
+partway through a turn.
+
+- [ ] **5.1 Prove it on the hub before building anything.** A throwaway
+  program in the quick-start repo, not the planner.
+  - A `DriveBase` on the existing drive motors: `axle_track = 160` (from
+    `fll_track_width_cm`), `wheel_diameter` **measured** — no measured value
+    exists yet in either repo. `use_gyro(True)`.
+  - Check the hub's Pybricks firmware has `then=Stop.NONE` on `straight` and
+    `turn`. Record the version here.
+  - Check that `straight(a, then=Stop.NONE)` followed by `straight(b)` is
+    seamless — no visible dip at the join.
+  - Check whether `settings()` is accepted mid-motion, between two
+    `then=Stop.NONE` moves. Speed limits (5.4) depend on it; if it is refused,
+    a limit has to stop the robot at its edges instead.
+  - Check what a `turn` is relative to after a drift: the actual heading, or
+    the previous target. Decides 5.6.
+  - Drive `run_square` both ways — current follow loop, and `DriveBase` —
+    five times each, and record where the robot ends up. Once on a full
+    battery and once on a tired one.
+  - *Done when:* each check above has an answer written here, and the
+    end-position spread says whether `DriveBase` is at least as repeatable.
+    If it is not, stop and rethink before 5.2.
+
+- [ ] **5.2 Remove timed triggers from the run format.**
+  - `build_run` rejects `at: {ms}` on an action with a clear diagnostic, and
+    speed limits accept only `cm`. The `armStep`'s own implicit marker is
+    internal and unaffected (and goes away in 5.4 anyway).
+  - Actions on a `turn` fire at its start; any `cm` other than 0 there is a
+    warning, pointing at the next step instead. On `toPoint`/`toPose`, `cm`
+    is measured along the straight part — which is what the builder's
+    displacement markers already do, since turns in place add no displacement.
+  - `version` 1 → 2. Before shipping, query Firestore for any saved run with
+    an `ms` placement. The editor never wrote one, so expect none; if there
+    are, the migration flags them rather than guessing a distance.
+  - Update "Run file format" below.
+  - *Done when:* tests cover the rejection, the turn rule and the migration,
+    and every golden that used `ms` placement is converted or retired
+    deliberately.
+
+- [ ] **5.3 Robot profiles and start positions: several of each, selectable,
+  and addable from the page.** Replaces 4.2 and 4.3. Needed before 5.5,
+  because the generated file has to carry the DriveBase numbers from
+  somewhere, and there is more than one set of them (a practice robot and a
+  competition robot, a rebuild mid-season). Likewise more than one start —
+  left and right launch areas, and whatever a mission needs.
+  - **A robot profile** is a name plus two groups of numbers:
+    - *planning* — what `RobotNumbers` already carries and
+      `robot_from_description` already reads: track width, top speed, centre
+      offset, width, length.
+    - *DriveBase* — `wheel_diameter_mm`, `axle_track_mm` (starts as the track
+      width, but kept separate because Pybricks' axle track is often tuned on
+      the robot to make turns land), `straight_speed`,
+      `straight_acceleration`, `turn_rate`, `turn_acceleration`, `use_gyro`.
+      Units as Pybricks takes them, so the numbers go into the file
+      unconverted.
+  - **A start position** is a name plus `x`, `y`, `head` — the numbers the
+    run's `start` already holds.
+  - **Choosing them.** Two pickers in the run's header, "Robot" and "Start".
+    Picking a start puts the robot there (the old 4.3's snapping). Dragging
+    the robot off it makes the start "custom", still with the name it came
+    from. Each picker ends with "＋ New…", and the selected entry has "Edit".
+  - **Adding them.** A small inline form under the picker, not a dialog —
+    fields with their units, Save and Cancel. "New start" is pre-filled from
+    wherever the robot currently sits on the field, so the usual way to add
+    one is to drag the robot into place and save it. "New robot" is
+    pre-filled from the selected robot, so a variant is one change away.
+  - **Stored team-wide**, in Firestore as `robots/<name>` and
+    `starts/<name>` (not per-owner like runs — the team shares one robot),
+    with the same open rules as runs and a cached copy in browser storage, so
+    the pickers still work offline. The team robot and the left launch pose
+    (-46, -83, 0) are built into the page, always present and not deletable,
+    so an empty or unreachable store never leaves nothing to pick.
+  - **A run keeps its own copy**, not a reference: `robot` becomes the
+    profile's name *and* its numbers, and `start` gains the name it came
+    from. A run already travels as a `.json` file (see `store.ts`), and has
+    to mean the same thing on a laptop that has never seen that profile. If
+    the named profile has since changed, the run says so next to the picker,
+    with a one-click "use the current numbers". Editing a profile never
+    silently changes a run that was already driving correctly.
+  - **On the hub**, the generated `run()` starts by handing the profile's
+    numbers to `core` (5.6), which rebuilds its DriveBase only if the
+    geometry differs and then applies the speeds. So `robot.py` holds no
+    tuning of its own, and the planner is the one place those numbers live.
+  - Folds into 5.2's format change: one `version` bump, not two. An old run's
+    `"robot": "fll_team"` loads as the built-in team profile.
+  - *Done when:* a profile and a start added on one laptop appear in the
+    pickers on another, a run saved with them opens the same on a third that
+    is offline, and editing a profile shows the "changed since" note on a run
+    that used it rather than altering it.
+
+- [ ] **5.4 Compile a run into a move list (headless, on the PC).** A new
+  `pythfinder/Export/driveProgram.py`, taking the same run description as
+  `build_run`.
+  - Walk the steps tracking the planned pose, and emit a flat list:
+    `straight(mm, then)`, `turn_to(deg)`, `wait(ms)`, `action(n)`,
+    `arm(step)`, `settings(speed)`. All the geometry — `toPoint`'s facing
+    angle and distance, `reversed` as a negative distance and +180° — is done
+    here, so the hub only gets numbers.
+  - Split drives at every action and speed-limit edge. Moves that flow into
+    another move get `then=Stop.NONE`; the last move before a wait, an arm
+    step or the end of the run stops.
+  - Negative `cm` ("from the end") resolves here, against the step's own
+    length, as `_at_within_step` does now.
+  - *Done when:* for every golden run, the end pose implied by the move list
+    matches `build_run`'s end pose to within 1 mm and 0.1°, and action order
+    matches the order `build_run` fires them.
+
+- [ ] **5.5 Generate the hub file from the move list.** Same shape as step
+  3.1's file — actions as functions, one `run(core)` — so `runs.py` does not
+  change. Reuses `_actions_source`'s action rendering; `run()` becomes the
+  move list as calls. No `STEPS`/`MARKERS`/`COUNT`/`DATA`, and no `from
+  trajectory import Trajectory`.
+  - *Done when:* generated files compile under MicroPython's grammar (the
+    existing code-action checks), and a snapshot test pins the text for the
+    template run.
+
+- [ ] **5.6 Hub side (quick-start repo).**
+  - `robot.py` builds `core.drive_base` from the 5.1 numbers as a default,
+    and `core.configure(...)` takes a profile's numbers from a generated
+    `run()` (5.3): a new DriveBase only if wheel diameter or axle track
+    changed, then `settings()` and `use_gyro()`.
+  - A `turn_to(core, deg)` helper: turns by the shortest path from the IMU's
+    *current* heading to the planned absolute one, so a drifted heading gets
+    corrected at every turn instead of carried forward. Unless 5.1 shows
+    `DriveBase` already does that.
+  - `trajectory.py` stays until every run on the hub has been regenerated;
+    old and new files can sit in the same `runs.py`.
+  - *Done when:* one regenerated run drives from `runs.py` via the selector.
+
+- [ ] **5.7 Planner UI.**
+  - Download writes the new file. The Python view (3.4) no longer needs to
+    elide anything — the whole file is readable.
+  - The download readout says moves and bytes, not states. Step 4.6 (hub
+    memory budget) becomes unnecessary; strike it.
+  - The playback and run time are labelled as an estimate.
+  - *Done when:* verified in the browser, and "Done on the robot" as in 2.7.
+
+- [ ] **5.8 Retire the recorded format.** Once no run on the hub imports
+  `Trajectory`: decide whether `hubModule.py` and the hub's `trajectory.py`
+  go, or stay for a future spline step. Nothing else depends on them.
 
 ---
 
@@ -1480,7 +1676,7 @@ Decide when we reach the step named. The recommendation is the default.
 | Which host actually reaches the team? | 2.1 | **Decided 2026-09-13, twice.** First: Cloudflare Pages, on the reasoning above — `.github/workflows/deploy-pages.yaml` builds and deploys it, and Cloudflare Access was going to front it exactly as it would a tunnel hostname. Then it turned out **the team's own network allows `*.firebaseapp.com` but not `*.pages.dev` at all** — the kids literally cannot reach a `pages.dev` domain, which no amount of Access configuration fixes. Landed on **Firebase Hosting** as the deploy the team actually uses (`.github/workflows/deploy-firebase.yaml`, landing on `pythfinder-planner.firebaseapp.com`), with the Cloudflare Pages deploy kept running alongside as a mentor-only mirror rather than torn out — it costs nothing to leave, and is useful from anywhere that *can* reach it. Saved runs (see step 2.8's revision) work identically from either host, since the page talks to Firestore directly from the browser rather than to anything host-specific. |
 | Gate the site with Cloudflare Access, or skip gating? | 2.1 | **Decided 2026-09-13: skip it.** Access is identity-based — email one-time codes, or an IdP login — and no team member has an email to receive one. The site relies on an unlisted URL instead: adequate for what this actually needs to guard against (per decision 2, "keep strangers from stumbling onto it," not a real adversary), and it is a run planner, not a system with anything sensitive in it. This decision was made moot for the primary deploy anyway once Firebase Hosting replaced Cloudflare Pages as the one the team uses — Firebase Hosting has no equivalent to Access at all on the free plan. Saved runs are scoped by a self-declared name instead of an authenticated identity — see step 2.8's revision. |
 | Upstream the headless refactor to omegacoreFLL/PythFinder, or keep it in our fork? | end of 1 | Offer upstream once goldens prove nothing changed |
-| One fixed team robot, or editable robot settings? | 4.2 | Fixed for the season; editable behind the mentor toggle |
+| One fixed team robot, or editable robot settings? | 5.3 | **Decided 2026-09-27: several named profiles, addable by anyone from the page**, alongside named start positions. Runs keep their own copy of the numbers. No mentor toggle for now — the Firestore rules are open anyway (see 2.8), so a toggle would only hide the form, not protect anything. |
 | How `run()` gets the data on the hub (`fromValues` vs a module self-import) | 3.1 | Whichever works on the hub; test both |
 
 ## Risks
@@ -1504,6 +1700,10 @@ Decide when we reach the step named. The recommendation is the default.
   worker has cached around it. Worth deciding how long sessions last before the
   kids meet it mid-practice.
 - **Hub heap.** Each run is roughly 6 bytes per exported state (about 16 KB for
-  the template run). Several long runs in one program add up, hence 4.6.
+  the template run). Several long runs in one program add up, hence 4.6 —
+  and phase 5, which removes the recorded data altogether.
+- **`DriveBase` turns out less repeatable than the follow loop.** Unlikely,
+  since it closes the loop on distance and the follow loop does not, but it is
+  the premise of phase 5, so 5.1 measures it before anything is built.
 - **Kids writing blocking custom actions.** Blocks cannot block; the code editor
   warns. The hub-side behaviour stays as documented in `fll_run_template.py`.
