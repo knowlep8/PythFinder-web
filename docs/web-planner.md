@@ -2024,6 +2024,35 @@ partway through a turn.
     old and new files can sit in the same `runs.py`.
   - *Done when:* one regenerated run drives from `runs.py` via the selector.
 
+  **Written 2026-09-27, in the quick-start repo; not yet committed there
+  (this session could not reach that repo's git) and not yet on a hub.**
+  - `config.py` gains `WHEEL_DIAMETER_MM` and `AXLE_TRACK_MM` — the old
+    base's 54.6 and 165.8 from 5.1 for now, marked for re-measuring on the
+    rebuilt base. They are only the fallback for a run with no profile.
+  - `robot.py` builds `core.drive_base` from them at start-up, gyro on, and
+    adds the three things 5.5's file calls: `configure(...)` (a new DriveBase
+    only if the wheel or axle track changed; any speed left out goes back to
+    the firmware's default, so one run's settings never leak into the next),
+    `set_heading(deg)`, and `turn_to(deg, by)` — of the rotations that end
+    facing `deg` from the gyro's actual heading, the one closest to `by`.
+  - `drivebase_test.py` now reads those numbers from `config.py` and uses
+    `core.configure()` rather than making a second DriveBase of its own.
+
+  *Checked on the laptop, with Pybricks stubbed:* the template run's
+  snapshot file (5.5) imported against the real `robot.py` replays its moves
+  in order and ends facing 0; `turn_to` from a 5° drift turns 85 for a
+  planned 90 and −275 for a planned −270; `turn_to(0, −360)` keeps the full
+  loop; a heading counted past 360 by the gyro makes no difference; a
+  profile with different geometry makes a new DriveBase, and a later run
+  without one goes back to `config.py`'s.
+
+  **Open until the hub says:** whether Pybricks allows a new DriveBase on
+  motors an earlier one already used. `configure()` relies on that whenever a
+  run's profile differs from `config.py` — and today it always will, since
+  the planner's built-in profile still holds the 56 / 160 placeholders.
+  (That one DriveBase and the follow loop's `dc()` calls can share the motors
+  *is* shown: 5.1's test G.) Added to 5.7's robot session.
+
 - [ ] **5.7 Planner UI.**
   - Download writes the new file. The Python view (3.4) no longer needs to
     elide anything — the whole file is readable.
@@ -2037,6 +2066,10 @@ partway through a turn.
     real twist; and the DriveBase square (H or I) five times on a full
     battery and five on a tired one. The groups have to be tight — that is
     the premise of the whole phase, and 5.8 waits on it.
+  - In the same session, for 5.6: download one run from the planner, add it
+    to `runs.py`, and drive it from the selector — once with a profile whose
+    wheel and axle numbers match `config.py`, once with numbers that differ,
+    which is what shows whether a second DriveBase on the same motors works.
 
   **The planner-UI half is done; the robot session above is still
   outstanding** — that is what keeps this box unticked.
