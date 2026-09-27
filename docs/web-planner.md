@@ -1928,7 +1928,7 @@ partway through a turn.
   `build_run`'s own `firing_order` already uses for markers, applied one step
   earlier.
 
-- [ ] **5.5 Generate the hub file from the move list.** Same shape as step
+- [x] **5.5 Generate the hub file from the move list.** Same shape as step
   3.1's file — actions as functions, one `run(core)` — so `runs.py` does not
   change. Reuses `_actions_source`'s action rendering; `run()` becomes the
   move list as calls. No `STEPS`/`MARKERS`/`COUNT`/`DATA`, and no `from
@@ -1936,6 +1936,67 @@ partway through a turn.
   - *Done when:* generated files compile under MicroPython's grammar (the
     existing code-action checks), and a snapshot test pins the text for the
     template run.
+
+  `pythfinder/Export/driveModule.py`: `drive_module_text(run)` returns
+  `{ok, module_text, diagnostics}`, `build_run`'s shape, with no file at all
+  when the move list has an error. The action functions come from
+  `hubModule.action_functions`, split out of `_actions_source` so both
+  formats write them in one place (the recorded format's tests are
+  unchanged by the split). The template run comes out as:
+
+  ```python
+  def run(core):
+      """Drive this run. The only thing runs.py needs to call."""
+      drive = core.configure()
+      core.set_heading(0)
+
+      drive.straight(350, then=Stop.NONE)
+      _action_1(core)        # arm down
+      drive.straight(400)
+      wait(600)
+      core.turn_to(90, 90)
+      drive.straight(290, then=Stop.NONE)
+      _action_2(core)        # arm up
+      drive.straight(10)
+      core.turn_to(201.8, 111.8)
+      drive.straight(807.8)
+      core.turn_to(0, 158.2)
+
+      core.stopTaskMotors()
+  ```
+
+  **The whole file is 1 KB, against 15.6 KB of `DATA` alone** for the same
+  run recorded (step 0.1) — and every line of it is readable.
+
+  **This fixes what 5.6 has to provide on `core`** — four things, and
+  nothing else:
+  - `core.configure(wheel_diameter, axle_track, straight_speed,
+    straight_acceleration, turn_rate, turn_acceleration, use_gyro)` → the
+    DriveBase. A run with a 5.3 profile passes its numbers, two to a line; a
+    run without one (`"fll_team"`, bare numbers) calls `configure()` with
+    none, gets `robot.py`'s defaults, and a warning says so rather than
+    inventing numbers nobody measured.
+  - `core.set_heading(deg)` — the run's start heading. `turn_to` works in
+    absolute field headings, so the gyro has to agree with the plan about
+    which way the robot faces before the first move. (The recorded format
+    got away without this only because every run so far started at 0.)
+  - `core.turn_to(deg, by)` — see 5.6.
+  - `core.stopTaskMotors()` at the end, as the follow loop always did, so an
+    attachment a parallel action started does not run on into the next run.
+
+  An arm step is inline in `run()` under its label, guarded like a motor
+  action (`if core.rightTask is not None:`) and blocking (`wait=True`); a
+  code override is the team's own and unguarded, as in 3.3. Imports appear
+  only when used: `Stop` for a `then=Stop.NONE`, `wait` for a wait.
+
+  *Verified:* `uv run python -m pytest tests -q` — **242 passed, 3 skipped, 1
+  xfailed** (227 before; 15 new in `tests/test_drive_module.py`). Every
+  generated file in them goes through `compile()`, the same parse check step
+  3.3 uses for code actions — not a MicroPython compiler, which would need
+  `mpy-cross` installed; nothing emitted is outside the subset
+  `trajectory.py` already runs on the hub. The template run is pinned whole
+  in `tests/golden/drive/template_run.py`. Not yet reachable from the
+  planner: the Download button still writes the recorded file until 5.7.
 
 - [ ] **5.6 Hub side (quick-start repo).**
   - `robot.py` builds `core.drive_base` from the 5.1 numbers as a default,

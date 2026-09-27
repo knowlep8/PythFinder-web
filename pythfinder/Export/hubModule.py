@@ -149,7 +149,37 @@ def _actions_source(actions: list) -> str:
     if actions is None:
         return ""
 
-    lines = ["", ""]
+    lines = ["", ""] + action_functions(actions)
+
+    lines.append("def run(core):")
+    lines.append('    """Drive this run. The only thing runs.py needs to call."""')
+    lines.append("    trajectory = Trajectory.fromValues(STEPS, MARKERS, COUNT, DATA)")
+
+    if actions:
+        lines.append("")
+        lines.append("    # bound in the order they FIRE, which is not necessarily")
+        lines.append("    # the order the steps were written")
+        lines.append("    trajectory.withMarkers((")
+
+        for number in range(1, len(actions) + 1):
+            lines.append("        lambda: _action_{0}(core),".format(number))
+
+        lines.append("    ))")
+        lines.append("")
+
+    lines.append("    trajectory.follow(core)")
+
+    return "\n".join(lines) + "\n"
+
+
+def action_functions(actions: list) -> list:
+    """One `def _action_N(core):` per action, numbered in firing order.
+
+    Shared with driveModule.py (step 5.5), which calls them from a DriveBase
+    run() instead of binding them to markers -- the functions themselves are
+    the same either way, so there is one place that writes them.
+    """
+    lines = []
 
     for number, action in enumerate(actions, start = 1):
         label = action.get("label") or action.get("id") or "action"
@@ -172,25 +202,7 @@ def _actions_source(actions: list) -> str:
         lines.append("")
         lines.append("")
 
-    lines.append("def run(core):")
-    lines.append('    """Drive this run. The only thing runs.py needs to call."""')
-    lines.append("    trajectory = Trajectory.fromValues(STEPS, MARKERS, COUNT, DATA)")
-
-    if actions:
-        lines.append("")
-        lines.append("    # bound in the order they FIRE, which is not necessarily")
-        lines.append("    # the order the steps were written")
-        lines.append("    trajectory.withMarkers((")
-
-        for number in range(1, len(actions) + 1):
-            lines.append("        lambda: _action_{0}(core),".format(number))
-
-        lines.append("    ))")
-        lines.append("")
-
-    lines.append("    trajectory.follow(core)")
-
-    return "\n".join(lines) + "\n"
+    return lines
 
 
 def _module_text(heading: str, steps: int, markers: tuple, count: int,

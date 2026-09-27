@@ -1,0 +1,181 @@
+"""Step 5.5: the hub file, written as DriveBase calls from the move list.
+
+driveProgram.py (step 5.4) already proves the geometry -- every golden run's
+move list ends where build_run's does. What is left to check here is the
+writing: that the file parses, carries the run's own robot numbers, guards
+what might not be plugged in, and says each move the way the hub side
+(step 5.6) will read it. The template run is pinned whole, as a snapshot,
+so any change to what the team downloads shows up as a diff to read.
+"""
+
+from pathlib import Path
+
+from pythfinder.Export.driveModule import drive_module_text
+from test_headless import TEMPLATE_RUN
+
+
+SNAPSHOT = Path(__file__).parent / "golden" / "drive" / "template_run.py"
+
+TEAM_PROFILE = {
+    "name": "Team robot",
+    "planning": {"track_width_cm": 16, "max_velocity_cm_s": 64.3},
+    "driveBase": {"wheel_diameter_mm": 54.6, "axle_track_mm": 165.8,
+                  "straight_speed": 200, "straight_acceleration": 400,
+                  "turn_rate": 150, "turn_acceleration": 300,
+                  "use_gyro": True},
+}
+
+
+def run_of(steps, robot = "fll_team", head = 0):
+    return {"version": 2, "name": "run_x", "steps_ms": 6, "robot": robot,
+            "start": {"x": 0, "y": 0, "head": head}, "steps": steps}
+
+
+def text_of(run):
+    result = drive_module_text(run)
+
+    assert result["ok"], result["diagnostics"]
+    compile(result["module_text"], run["name"] + ".py", "exec")
+
+    return result["module_text"]
+
+
+def run_body(text):
+    return text.split("def run(core):")[1]
+
+
+def test_the_template_run_matches_its_snapshot():
+    """The whole file the team would download for the template run.
+
+    If this fails because the output was changed on purpose, read the diff,
+    and if it is what was meant, regenerate the snapshot from
+    drive_module_text(TEMPLATE_RUN)["module_text"].
+    """
+    assert text_of(TEMPLATE_RUN) == SNAPSHOT.read_text()
+
+
+def test_the_file_is_small():
+    """The point of phase 5, in one number: the recorded template run is
+    15642 bytes of DATA alone (step 0.1)."""
+    assert len(text_of(TEMPLATE_RUN)) < 1500
+
+
+def test_a_run_without_drivebase_numbers_uses_the_hubs_own_and_says_so():
+    result = drive_module_text(TEMPLATE_RUN)
+
+    assert "    drive = core.configure()" in result["module_text"]
+    assert any("robot.py's defaults" in d["message"] for d in result["diagnostics"])
+
+
+def test_a_profile_carries_its_drivebase_numbers_into_the_file():
+    text = text_of(run_of([{"type": "drive", "cm": 30}], robot = TEAM_PROFILE))
+
+    assert "    # Team robot" in text
+    assert "wheel_diameter=54.6, axle_track=165.8," in text
+    assert "straight_speed=200, straight_acceleration=400," in text
+    assert "turn_rate=150, turn_acceleration=300," in text
+    assert "use_gyro=True)" in text
+
+
+def test_the_start_heading_is_given_to_the_gyro():
+    """Turns are to absolute field headings, so the gyro has to start out
+    agreeing with the plan about which way the robot faces."""
+    text = text_of(run_of([{"type": "turn", "deg": 180}], head = 90))
+
+    assert "    core.set_heading(90)" in text
+    assert "    core.turn_to(180, 90)" in text
+
+
+def test_a_reversed_turn_keeps_the_long_way_round():
+    text = text_of(run_of([{"type": "turn", "deg": 90, "reversed": True}]))
+
+    assert "    core.turn_to(90, -270)" in text
+
+
+def test_a_backwards_drive_is_a_negative_straight():
+    text = text_of(run_of([{"type": "drive", "cm": -25}]))
+
+    assert "    drive.straight(-250)" in text
+
+
+def test_an_action_splits_the_drive_and_keeps_rolling():
+    text = text_of(run_of([{"type": "drive", "cm": 40, "actions": [
+        {"id": "a1", "at": {"cm": 15}, "label": "grab",
+         "do": {"motor": "leftTask", "call": "run", "speed": 500}}]}]))
+
+    body = run_body(text)
+    assert ("    drive.straight(150, then=Stop.NONE)\n"
+            "    _action_1(core)        # grab\n"
+            "    drive.straight(250)\n") in body
+    assert "from pybricks.parameters import Stop" in text
+
+
+def test_nothing_is_imported_that_is_not_used():
+    text = text_of(run_of([{"type": "drive", "cm": 30}]))
+
+    assert "import Stop" not in text
+    assert "import wait" not in text
+
+
+def test_actions_are_numbered_in_the_order_they_fire():
+    """Written on two steps in the order b then a, but a fires first: the
+    function numbers, and the calls in run(), follow the robot, not the list."""
+    text = text_of(run_of([
+        {"type": "drive", "cm": 40, "actions": [
+            {"id": "b", "at": {"cm": 30}, "label": "second",
+             "do": {"motor": "leftTask", "call": "stop"}},
+            {"id": "a", "at": {"cm": 10}, "label": "first",
+             "do": {"motor": "leftTask", "call": "run", "speed": 300}}]}]))
+
+    assert '"""first"""' in text.split("def _action_1")[1].split("def ")[0]
+    body = run_body(text)
+    assert body.index("_action_1(core)") < body.index("_action_2(core)")
+
+
+def test_an_arm_step_blocks_and_is_guarded():
+    text = text_of(run_of([{"type": "armStep", "motor": "rightTask",
+                            "call": "run_angle", "speed": 300, "angle": 90}]))
+
+    assert ("    if core.rightTask is not None:\n"
+            "        core.rightTask.run_angle(300, 90, wait=True)\n") in text
+
+
+def test_a_code_action_is_the_teams_own_and_unguarded():
+    text = text_of(run_of([{"type": "drive", "cm": 40, "actions": [
+        {"id": "a1", "at": {"cm": 0}, "label": "custom",
+         "do": {"code": "core.leftTask.run(500)\ncore.rightTask.run(-500)"}}]}]))
+
+    function = text.split("def _action_1(core):")[1].split("def run")[0]
+    assert "    core.leftTask.run(500)\n    core.rightTask.run(-500)" in function
+    assert "is not None" not in function
+
+
+def test_a_speed_limit_is_a_settings_change_either_side():
+    text = text_of(run_of([{"type": "drive", "cm": 60, "speedLimits": [
+        {"id": "s", "from": {"cm": 20}, "to": {"cm": 40}, "cm_s": 5}]}],
+        robot = TEAM_PROFILE))
+
+    body = run_body(text)
+    assert ("    drive.straight(200, then=Stop.NONE)\n"
+            "    drive.settings(straight_speed=50)\n"
+            "    drive.straight(200, then=Stop.NONE)\n"
+            "    drive.settings(straight_speed=200)\n"
+            "    drive.straight(200)\n") in body
+
+
+def test_a_run_with_an_error_gives_no_file():
+    """A file that drives somewhere other than the plan is worse than none."""
+    result = drive_module_text(run_of([{"type": "drive", "cm": 30, "actions": [
+        {"id": "a1", "at": {"ms": 100}}]}]))
+
+    assert not result["ok"]
+    assert result["module_text"] is None
+    assert any(d["level"] == "error" for d in result["diagnostics"])
+
+
+def test_run_ends_by_stopping_the_attachment_motors():
+    """As the recorded format's follow() always did, so nothing a parallel
+    action started keeps running into the next run."""
+    text = text_of(run_of([{"type": "drive", "cm": 30}]))
+
+    assert text.rstrip().endswith("    core.stopTaskMotors()")
