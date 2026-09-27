@@ -65,6 +65,10 @@ STEP_TYPES = ("drive", "wait", "turn", "toPoint", "toPose", "armStep")
 # still reads as a step of its own on the timeline.
 LEAST_ARM_MS = 150
 
+# Below this many cm, a turn action's own placement is the same as cm: 0 --
+# nothing a person typed on purpose, only float error left by AngularSegment.
+TURN_ACTION_CM_EPSILON = 1e-6
+
 
 def arm_step_ms(step: dict) -> int:
     """How long an arm step is expected to take, in milliseconds.
@@ -213,7 +217,19 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
         for action in step.get("actions", []):
             _check_code(action, index, diagnostics)
 
-            at = _at_within_step(action.get("at"), step, into_wait, into_line)
+            raw_at = action.get("at")
+
+            if _placed_by_time(raw_at):
+                diagnostics.append(Diagnostic.error(
+                    "an action can only be placed by distance now, not a time",
+                    step = index,
+                    suggestion = "give it a distance into the step instead"))
+                continue
+
+            if kind == "turn":
+                _warn_if_turn_action_off_start(raw_at, index, diagnostics)
+
+            at = _at_within_step(raw_at, step, into_wait, into_line)
 
             if _add_action(builder, dict(action, at = at), index, diagnostics):
                 action_steps[action.get("id")] = index
@@ -316,6 +332,41 @@ def _step_own_cm(step: dict) -> float:
         return 0.0
 
 
+def _placed_by_time(at) -> bool:
+    """True for a raw, person-written (or old-saved-run) `at` using "ms".
+
+    Step 5.2: timed triggers are gone from the run format -- an action split
+    a drive for the DriveBase (5.4/5.5), and a DriveBase has no notion of "so
+    many milliseconds in". Checked against the *raw* value a caller was
+    handed, before _at_within_step has a chance to synthesise its own
+    internal "ms" (the armStep's implicit marker, a turn's own start) --
+    those are never what this is guarding against.
+    """
+    return isinstance(at, dict) and "ms" in at
+
+
+def _warn_if_turn_action_off_start(at, index: int, diagnostics: list):
+    """A turn covers no distance, so cm: 0 is the only value that means
+    anything -- anything else is a step ahead of itself. Still placed (at
+    the turn's own start, by _at_within_step), just with a warning rather
+    than a silent surprise: see driveProgram.py's _process_turn_actions,
+    which reaches the identical rule from the flat move list's own side.
+    """
+    if not isinstance(at, dict) or "cm" not in at:
+        return
+
+    try:
+        off_start = abs(float(at["cm"])) > TURN_ACTION_CM_EPSILON
+    except (TypeError, ValueError):
+        return
+
+    if off_start:
+        diagnostics.append(Diagnostic.warning(
+            "an action on a turn only ever fires at its start",
+            step = index,
+            suggestion = "move it to the next step"))
+
+
 def _at_within_step(at, step: dict, into_wait: int, into_line: float):
     """Move an action's placement from "into this step" to "into this segment".
 
@@ -327,6 +378,14 @@ def _at_within_step(at, step: dict, into_wait: int, into_line: float):
     A negative value counts back from the end of *this* step, not the merged
     segment's, so it is resolved here against the step's own length rather than
     left to the builder, which knows only the segment.
+
+    Step 5.2 removed `ms` placement from what a person can type -- every
+    caller now rejects a raw `at` containing "ms" before this function ever
+    sees it. Only two internal uses of "ms" survive, both synthesised here,
+    never supplied: the armStep's own implicit marker below, and a turn's
+    "cm" action, converted to "ms" because a turn's own *displacement* is a
+    razor-thin float sliver an AngularSegment leaves behind (see
+    _warn_if_turn_action_off_start) where its *elapsed time* is not.
     """
     kind = step.get("type")
 
@@ -344,11 +403,12 @@ def _at_within_step(at, step: dict, into_wait: int, into_line: float):
 
         return dict(at, cm = into_line + within)
 
-    if "ms" in at and kind in ("wait", "armStep"):
-        value = int(at["ms"])
-        within = _step_own_ms(step) + value if value < 0 else value
-
-        return dict(at, ms = into_wait + within)
+    if "cm" in at and kind == "turn":
+        # A turn covers no distance, so the only moment a distance can mean
+        # is the turn's own start -- routed through the segment's elapsed
+        # time, which AngularSegment tracks properly, rather than its
+        # displacement, which does not (see the note above).
+        return {"ms": into_wait}
 
     return at
 
@@ -641,7 +701,9 @@ def _speed_limit_key(at) -> str:
 
 
 def _chain_speed_limit_lines(resolved_from: dict, resolved_to: dict, cm_s: float) -> list:
-    """The two real .addRelative...Constraints(...) calls a limit becomes.
+    """The two real .addRelativeDisplacementConstraints(...) calls a limit
+    becomes -- step 5.2 made cm the only shape a limit's from/to can take, so
+    there is only ever the one call to name here.
 
     Unlike an action's print() stand-in, these are the actual call the run
     itself makes -- a constraint is not simulator-only, so there is nothing
@@ -649,14 +711,12 @@ def _chain_speed_limit_lines(resolved_from: dict, resolved_to: dict, cm_s: float
     which is what a headless build's default robot already carries too (see
     FLL_ROBOT's own constraints in robotConfig.py).
     """
-    if "cm" in resolved_from:
-        call, start, end = "addRelativeDisplacementConstraints", resolved_from["cm"], resolved_to["cm"]
-    else:
-        call, start, end = "addRelativeTemporalConstraints", resolved_from["ms"], resolved_to["ms"]
+    call = "addRelativeDisplacementConstraints"
 
     return [
-        ".{0}({1}, Constraints2D(linear = Constraints(vel = {2})))".format(call, start, cm_s),
-        ".{0}({1}, Constraints2D())".format(call, end),
+        ".{0}({1}, Constraints2D(linear = Constraints(vel = {2})))".format(
+            call, resolved_from["cm"], cm_s),
+        ".{0}({1}, Constraints2D())".format(call, resolved_to["cm"]),
     ]
 
 
@@ -692,12 +752,21 @@ def _add_speed_limit(builder: TrajectoryBuilder, step: dict, spec: dict, index: 
     from_key = _speed_limit_key(from_at)
     to_key = _speed_limit_key(to_at)
 
-    if from_key is None or to_key is None or from_key != to_key:
+    if from_key == "ms" or to_key == "ms":
+        # step 5.2: the same rule an action's `at` follows, applied here --
+        # a speed limit's from/to are cm-only now, not "cm, or both ms".
+        diagnostics.append(Diagnostic.error(
+            "a speed limit can only be placed by distance now, not a time",
+            step = index,
+            suggestion = "give both ends a distance into the step instead"))
+        return []
+
+    if from_key is None or to_key is None:
         diagnostics.append(Diagnostic.error(
             "a speed limit's start and end have to both be a distance into "
-            "the step, or both a time",
+            "the step",
             step = index,
-            suggestion = "use cm in for both, or ms for both"))
+            suggestion = "give both a distance in cm"))
         return []
 
     try:
@@ -717,7 +786,7 @@ def _add_speed_limit(builder: TrajectoryBuilder, step: dict, spec: dict, index: 
     resolved_from = _at_within_step(from_at, step, into_wait, into_line)
     resolved_to = _at_within_step(to_at, step, into_wait, into_line)
 
-    if resolved_from[from_key] >= resolved_to[to_key]:
+    if resolved_from["cm"] >= resolved_to["cm"]:
         diagnostics.append(Diagnostic.error(
             "a speed limit has to end after it starts",
             step = index,
@@ -727,12 +796,8 @@ def _add_speed_limit(builder: TrajectoryBuilder, step: dict, spec: dict, index: 
     slow = normal_constraints.copy()
     slow.linear.set(vel = cm_s)
 
-    if from_key == "cm":
-        builder.addRelativeDisplacementConstraints(resolved_from["cm"], slow)
-        builder.addRelativeDisplacementConstraints(resolved_to["cm"], normal_constraints.copy())
-    else:
-        builder.addRelativeTemporalConstraints(resolved_from["ms"], slow)
-        builder.addRelativeTemporalConstraints(resolved_to["ms"], normal_constraints.copy())
+    builder.addRelativeDisplacementConstraints(resolved_from["cm"], slow)
+    builder.addRelativeDisplacementConstraints(resolved_to["cm"], normal_constraints.copy())
 
     return _chain_speed_limit_lines(resolved_from, resolved_to, cm_s)
 

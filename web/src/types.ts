@@ -35,13 +35,21 @@ export function isCode(body: ActionBody): body is CodeCommand {
 export interface RunAction {
   id: string;
   /**
-   * When in the step it happens: a distance into it, or a time, with negative
-   * counting back from the end.
+   * When in the step it happens: a distance into it, negative counting back
+   * from the end.
    *
    * A sequential arm step leaves this out — it *is* the step, so it starts as
    * the robot comes to rest, and build_run works out when that is.
+   *
+   * cm-only since step 5.2 -- a DriveBase split has no "so many ms in" to
+   * give it, and this editor never wrote one even before that step. A run
+   * saved before 5.2 can still hold `{"ms": ...}` on disk, because nothing
+   * about JSON stops it -- this type only says what the page itself ever
+   * writes or reads back out. build_run flags that case with a diagnostic on
+   * the step rather than silently reinterpreting it -- see
+   * docs/web-planner.md, step 5.2.
    */
-  at?: { cm?: number; ms?: number };
+  at?: { cm?: number };
   do?: ActionBody;
   label?: string;
 }
@@ -64,10 +72,8 @@ export type StepType =
  * A slow, careful section within one step -- step 4.5.
  *
  * Both `from` and `to` are placed the same way an action's `at` is: a
- * distance into the step, or a time, negative counting back from the end.
- * They must agree on which -- both `cm`, or both `ms` -- because comparing a
- * distance to a time needs the trajectory built first, and this has to be
- * checked before that happens.
+ * distance into the step, negative counting back from the end. cm-only
+ * since step 5.2, the same rule and the same reason as `RunAction.at`.
  *
  * Setting a limit changes the robot's planned speed ceiling from where it
  * starts *for the rest of the run*, with no automatic reset -- so `to` is
@@ -76,8 +82,8 @@ export type StepType =
  */
 export interface SpeedLimit {
   id: string;
-  from: { cm?: number; ms?: number };
-  to: { cm?: number; ms?: number };
+  from: { cm?: number };
+  to: { cm?: number };
   /** the ceiling while the limit is in effect, in cm/s */
   cm_s: number;
 }

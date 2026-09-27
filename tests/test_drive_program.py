@@ -117,16 +117,14 @@ def test_golden_with_no_run_description_equivalent(name, reason):
     pytest.skip("{0}: {1}".format(name, reason))
 
 
-def test_template_run_end_pose_still_matches_despite_a_rejected_action():
-    """The real run the team drives has one action build_run still accepts
-    that this module does not: "arm up" is placed with {"ms": -1} on a
-    drive step (see docs/web-planner.md, step 5.2's still-open work) --
-    exactly the "timed action on a moving step" case this module refuses
-    rather than guesses at. That does not touch the geometry, only whether a
-    marker exists, so the end pose still has to agree; the full action-order
-    comparison golden_runs.py's other runs get is not attempted here, because
-    build_run fires "arm up" and this module never does -- there being
-    nothing for the two lists to agree about for that one action.
+def test_template_run_with_a_timed_action_is_refused_by_both():
+    """Step 5.2 closed the gap this test used to pin: build_run still
+    accepted {"ms": -1} on a drive step (the real run the team drives has
+    exactly this, on its "arm up" action) while this module already refused
+    it as "not supported" -- one rule here, a looser one there. Now both
+    refuse it the same way, naming the same step, which is what
+    driveProgram.py's own note on dropping its wait/armStep ms-support was
+    for: one rule everywhere, not two.
     """
     run = run_with([
         {"type": "drive", "cm": 75,
@@ -141,22 +139,26 @@ def test_template_run_end_pose_still_matches_despite_a_rejected_action():
     reference = build_run(run)
     compiled = compile_drive_program(run)
 
-    assert reference["ok"]
-    assert not compiled["ok"], "an ms-placed action on a drive should be refused"
+    assert not reference["ok"], "a timed action should now be refused here too"
+    assert not compiled["ok"]
 
-    rejected = [d for d in compiled["diagnostics"] if d["level"] == "error"]
-    assert len(rejected) == 1
-    assert rejected[0]["step"] == 3
-    assert "not supported" in rejected[0]["message"]
+    ref_errors = [d for d in reference["diagnostics"] if d["level"] == "error"]
+    compiled_errors = [d for d in compiled["diagnostics"] if d["level"] == "error"]
 
+    assert len(ref_errors) == 1 and ref_errors[0]["step"] == 3
+    assert len(compiled_errors) == 1 and compiled_errors[0]["step"] == 3
+
+    # the geometry is untouched either way -- only the one timed marker is
+    # refused, so the end pose the two modules predict still has to agree
     expected = reference["poses"][-1]
     actual = compiled["end_pose"]
     assert abs(expected["x"] - actual["x"]) <= 0.1
     assert abs(expected["y"] - actual["y"]) <= 0.1
     assert heading_difference(expected["head"], actual["head"]) <= 0.1
 
-    # the one action this module *can* place still comes through, and still
-    # comes through first
+    # the one action both *can* place still comes through, and still comes
+    # through first
+    assert [m["id"] for m in reference["markers"]] == ["arm_down"]
     assert action_ids(compiled) == ["arm_down"]
 
 
@@ -494,32 +496,43 @@ def test_an_action_between_two_pieces_does_not_force_a_stop():
     assert [m["op"] for m in compiled["moves"]] == ["straight", "action", "straight"]
 
 
-# --- timed placement: trivial in a wait, refused on a moving step -----------
+# --- timed placement: refused everywhere, including a wait ------------------
+#
+# Step 5.2 closed the one gap this module used to leave open on purpose: a
+# wait step could carry an action placed in time (its own length is a
+# length of time, so "ms" made sense there in a way it never did on a
+# moving step), split around with wait(a), action, wait(b). But build_run
+# now refuses "ms" everywhere too, and canCarryActions in runEditor.ts never
+# let the editor attach an action to a wait step in the first place -- so
+# the split machinery served a case nobody could actually reach, one rule
+# here and a different one in build_run. It is gone; a wait step's own
+# actions are refused outright now, the same as a speed limit already was.
 
-def test_a_wait_is_split_around_an_action_placed_in_time():
+
+def test_an_action_on_a_wait_is_refused():
     compiled = compile_drive_program(run_with([{"type": "wait", "ms": 600,
         "actions": [{"id": "a1", "at": {"ms": 200}}]}]))
 
-    assert [m["op"] for m in compiled["moves"]] == ["wait", "action", "wait"]
-    waits = ops(compiled, "wait")
-    assert [m["ms"] for m in waits] == [200, 400]
+    assert not compiled["ok"]
+    errors = [d for d in compiled["diagnostics"] if d["level"] == "error"]
+    assert len(errors) == 1
+    assert errors[0]["step"] == 0
+    assert "attached to a wait" in errors[0]["message"]
+
+    # the wait itself still happens -- only the action is refused
+    assert [m["op"] for m in compiled["moves"]] == ["wait"]
+    assert ops(compiled, "wait")[0]["ms"] == 600
+    assert action_ids(compiled) == []
 
 
-def test_a_negative_ms_in_a_wait_counts_back_from_its_own_end():
+def test_a_cm_placed_action_on_a_wait_is_also_refused():
+    """Not just "ms" -- a wait has no distance either, so any action on one
+    is refused, whatever it was placed with."""
     compiled = compile_drive_program(run_with([{"type": "wait", "ms": 600,
-        "actions": [{"id": "a1", "at": {"ms": -100}}]}]))
+        "actions": [{"id": "a1", "at": {"cm": 5}}]}]))
 
-    waits = ops(compiled, "wait")
-    assert [m["ms"] for m in waits] == [500, 100]
-
-
-def test_two_actions_in_one_wait_split_it_into_three_pieces():
-    compiled = compile_drive_program(run_with([{"type": "wait", "ms": 1000,
-        "actions": [{"id": "w1", "at": {"ms": 200}},
-                    {"id": "w2", "at": {"ms": -100}}]}]))
-
-    assert action_ids(compiled) == ["w1", "w2"]
-    assert [m["ms"] for m in ops(compiled, "wait")] == [200, 700, 100]
+    assert not compiled["ok"]
+    assert action_ids(compiled) == []
 
 
 @pytest.mark.parametrize("step", [

@@ -6,6 +6,8 @@ badly described run has to come back as diagnostics rather than an exception --
 a child typing a wrong number is ordinary, not exceptional.
 """
 
+import pytest
+
 from pythfinder.headless import build_run
 
 from golden_runs import GOLDEN_DIR, GOLDEN_RUNS
@@ -22,8 +24,13 @@ TEMPLATE_RUN = {
          "actions": [{"id": "arm_down", "at": {"cm": 35}, "label": "arm down"}]},
         {"type": "wait", "ms": 600},
         {"type": "turn", "deg": 90},
+        # was {"ms": -1} -- "1ms before the end" -- until step 5.2 removed
+        # time placement from the format. {"cm": -1}, "1cm before the end",
+        # is the distance-based idiom that replaces it; see
+        # test_the_template_run_described_as_data_gives_the_golden_file for
+        # what that changes about the golden comparison below.
         {"type": "drive", "cm": 30,
-         "actions": [{"id": "arm_up", "at": {"ms": -1}, "label": "arm up"}]},
+         "actions": [{"id": "arm_up", "at": {"cm": -1}, "label": "arm up"}]},
         {"type": "toPose", "x": -46, "y": -83, "head": 0},
     ],
 }
@@ -54,13 +61,46 @@ def data_only(module_text):
     )
 
 
+def motion_only(module_text):
+    """Just the states the robot drives on -- not MARKERS.
+
+    Step 5.2 removed time placement, so TEMPLATE_RUN's "arm up" action moved
+    from {"ms": -1} to {"cm": -1} -- see TEMPLATE_RUN's own comment. That is
+    a different moment (7673ms into the run, not 7942), so MARKERS no longer
+    matches the pinned hub file byte for byte; the motion itself does not
+    depend on where a marker sits, so STEPS/COUNT/DATA still should. The
+    byte-for-byte proof of MARKERS against that same file lives on
+    unaffected in test_hub_module.py, built through golden_runs.py's own
+    TrajectoryBuilder chain -- which still places that action with
+    .addRelativeTemporalMarker(-1, ...), a call this format no longer
+    exposes but the library itself still has.
+    """
+    keep = ("STEPS", "COUNT", "DATA")
+    lines = module_text.split("\n")
+
+    return "\n".join(
+        line for line in lines
+        if line.startswith(keep) or line.startswith("    b")
+    )
+
+
 def test_the_template_run_described_as_data_gives_the_golden_file():
     """The same run the team drives, described as JSON instead of Python.
 
-    Compared on the data alone. The file on the hub predates step 3.2, which
-    adds the attachment motor code and a run() below the constants -- so the
-    numbers the robot drives on must still match it exactly, while the code
-    section is new and is checked separately.
+    Compared on the motion alone -- not the full data_only() block this test
+    used to check byte for byte. The file on the hub predates step 3.2, which
+    adds the attachment motor code and a run() below the constants, so the
+    numbers the robot *drives on* (STEPS/COUNT/DATA) must still match it
+    exactly; the code section is new and is checked separately.
+
+    MARKERS is deliberately excluded now. The hub file's second marker was
+    placed with a temporal trigger ({"ms": -1}, "1ms before the end") that
+    step 5.2 removed from the run-description format; TEMPLATE_RUN's
+    equivalent is now {"cm": -1}, which lands at a different, but equally
+    valid, moment (see TEMPLATE_RUN's own comment and motion_only's). The
+    byte-for-byte MARKERS proof against this same golden file still lives at
+    the library level, in test_hub_module.py, built through golden_runs.py's
+    TrajectoryBuilder chain -- a path this format change does not touch.
     """
     result = build_run(TEMPLATE_RUN)
 
@@ -68,7 +108,12 @@ def test_the_template_run_described_as_data_gives_the_golden_file():
     assert result["total_ms"] == 15641
 
     on_the_hub = (GOLDEN_DIR / "hub" / "template_run.py").read_text()
-    assert data_only(result["module_text"]) == data_only(on_the_hub)
+    assert motion_only(result["module_text"]) == motion_only(on_the_hub)
+
+    # the marker moved, but is still there, still ordered second, and still
+    # lands inside the step it belongs to
+    assert [m["id"] for m in result["markers"]] == ["arm_down", "arm_up"]
+    assert result["markers"][1]["time_ms"] < result["total_ms"]
 
 
 def test_the_template_run_now_carries_its_own_code():
@@ -149,9 +194,11 @@ def test_markers_come_back_in_the_order_they_fire():
         # the action here happens late in the run...
         {"type": "drive", "cm": 75,
          "actions": [{"id": "second", "at": {"cm": 70}}]},
-        # ...and this one, written later, happens sooner after it
+        # ...and this one, written later, happens sooner after it. A turn
+        # only ever fires at its own start -- step 5.2 -- so cm: 0 is the
+        # only placement that does not warn.
         {"type": "turn", "deg": 90,
-         "actions": [{"id": "third", "at": {"ms": 1}}]},
+         "actions": [{"id": "third", "at": {"cm": 0}}]},
     ]
 
     result = build_run(run)
@@ -309,3 +356,140 @@ def test_an_unknown_robot_is_reported():
 
     assert not result["ok"]
     assert "somebody_elses_robot" in result["diagnostics"][0]["message"]
+
+
+# --- step 5.2: timed triggers are gone ---------------------------------------
+
+def build(step, start=None):
+    return build_run({
+        "version": 2,
+        "name": "time_placement",
+        "steps_ms": 6,
+        "robot": "fll_team",
+        "start": start or {"x": 0, "y": 0, "head": 0},
+        "steps": [step],
+    })
+
+
+@pytest.mark.parametrize("step", [
+    {"type": "drive", "cm": 40,
+     "actions": [{"id": "a1", "at": {"ms": 100}}]},
+    {"type": "turn", "deg": 90,
+     "actions": [{"id": "a1", "at": {"ms": 100}}]},
+    {"type": "toPoint", "x": 0, "y": 40,
+     "actions": [{"id": "a1", "at": {"ms": 100}}]},
+    {"type": "toPose", "x": 0, "y": 40, "head": 90,
+     "actions": [{"id": "a1", "at": {"ms": 100}}]},
+])
+def test_an_action_placed_by_time_is_rejected_on_every_step_that_moves(step):
+    """The one rule that now applies everywhere: build_run only ever places
+    an action by distance. Not just drives -- a turn, a toPoint and a toPose
+    all refuse "ms" the same way, with the same clear diagnostic."""
+    result = build(step)
+
+    assert not result["ok"]
+    problems = [d for d in result["diagnostics"] if d["level"] == "error"]
+    assert len(problems) == 1
+    assert problems[0]["step"] == 0
+    assert "time" in problems[0]["message"]
+    assert problems[0]["suggestion"] == "give it a distance into the step instead"
+    assert result["markers"] == []
+
+
+def test_an_old_saved_run_with_time_placement_is_flagged_not_guessed():
+    """The migration step 5.2 asks for: a run saved before this rule existed
+    (version 1, the editor never wrote "ms" but a hand-edited or imported
+    file could carry one) still loads and builds -- it just comes back
+    flagged on its own step, rather than the planner silently inventing a
+    distance for something it was never told."""
+    run = {
+        "version": 1,
+        "name": "old_run",
+        "steps_ms": 6,
+        "robot": "fll_team",
+        "start": {"x": 0, "y": 0, "head": 0},
+        "steps": [
+            {"type": "drive", "cm": 30},
+            {"type": "drive", "cm": 30,
+             "actions": [{"id": "old", "at": {"ms": 500}, "label": "old action"}]},
+        ],
+    }
+
+    result = build_run(run)
+
+    assert not result["ok"]
+    assert result["markers"] == []
+
+    flagged = [d for d in result["diagnostics"] if d["level"] == "error"]
+    assert len(flagged) == 1
+    assert flagged[0]["step"] == 1
+    assert "time" in flagged[0]["message"]
+
+    # the rest of the run is unaffected -- only the one action is refused
+    assert result["total_ms"] > 0
+
+
+def test_a_turn_action_at_its_start_fires_with_no_warning():
+    result = build({"type": "turn", "deg": 90,
+                    "actions": [{"id": "a1", "at": {"cm": 0}}]})
+
+    assert result["ok"], result["diagnostics"]
+    assert [m["id"] for m in result["markers"]] == ["a1"]
+    assert result["diagnostics"] == []
+
+
+def test_a_turn_action_off_its_start_still_fires_but_warns():
+    """A turn covers no distance, so cm: 0 is the only real placement -- but
+    an action written with some other cm still has to fire *somewhere*
+    rather than vanish, so it fires at the only moment a turn has (its
+    start), with a warning pointing at the step it probably belongs to."""
+    result = build({"type": "turn", "deg": 90,
+                    "actions": [{"id": "a1", "at": {"cm": 15}}]})
+
+    assert result["ok"]
+    assert [m["id"] for m in result["markers"]] == ["a1"]
+
+    warnings = [d for d in result["diagnostics"] if d["level"] == "warning"]
+    assert len(warnings) == 1
+    assert warnings[0]["step"] == 0
+    assert "only ever fires at its start" in warnings[0]["message"]
+    assert warnings[0]["suggestion"] == "move it to the next step"
+
+
+def test_a_speed_limit_can_only_be_placed_by_distance():
+    result = build({"type": "drive", "cm": 80, "speedLimits": [
+        {"id": "s1", "from": {"ms": 100}, "to": {"ms": 500}, "cm_s": 10}]})
+
+    assert not result["ok"]
+    problems = [d for d in result["diagnostics"] if d["level"] == "error"]
+    assert len(problems) == 1
+    assert problems[0]["step"] == 0
+    assert "not a time" in problems[0]["message"]
+
+
+def test_toPoint_action_is_measured_along_the_straight_part_only():
+    """The plan's own claim (docs/web-planner.md, step 5.2): a toPoint's
+    initial turn-to-face adds no displacement, so "cm" measures only the
+    straight leg. Pinned by comparing two runs that both drive 40cm in a
+    straight line to the same action, differing only in how much turning it
+    took to get facing that way first: the *time left after the action*
+    (ends_ms - the marker's own time) has to be identical, because that
+    remainder is entirely within the straight part, which neither run's
+    turning touches.
+    """
+    def marker_to_end_gap(start_head):
+        result = build({"type": "toPoint", "x": 0, "y": 40,
+                        "actions": [{"id": "a1", "at": {"cm": 10}}]},
+                       start = {"x": 0, "y": 0, "head": start_head})
+
+        assert result["ok"], result["diagnostics"]
+
+        return result["steps"][0]["ends_ms"] - result["markers"][0]["time_ms"]
+
+    no_turn = marker_to_end_gap(90)       # already facing the target
+    small_turn = marker_to_end_gap(60)
+    big_turn = marker_to_end_gap(0)
+    reverse_turn = marker_to_end_gap(180)
+
+    assert small_turn == big_turn == reverse_turn
+    assert abs(no_turn - small_turn) <= 1   # rounding at the segment boundary

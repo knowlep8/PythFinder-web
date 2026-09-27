@@ -114,11 +114,21 @@ def test_negative_speed_is_an_error():
     assert not result["ok"]
 
 
-def test_mismatched_units_is_an_error():
+def test_a_time_based_limit_is_refused():
+    """Step 5.2: a speed limit's from/to are cm-only now, not "cm, or both
+    ms" -- so a "ms" end is refused outright, mismatched with the other end
+    or not."""
     result = build([drive(80, [limit(from_at={"cm": 30}, to_at={"ms": 500}, cm_s=10)])])
 
     assert not result["ok"]
-    assert any("both" in d["message"] for d in result["diagnostics"])
+    assert any("not a time" in d["message"] for d in result["diagnostics"])
+
+
+def test_a_purely_temporal_limit_is_also_refused():
+    result = build([drive(80, [limit(from_at={"ms": 100}, to_at={"ms": 500}, cm_s=10)])])
+
+    assert not result["ok"]
+    assert any("not a time" in d["message"] for d in result["diagnostics"])
 
 
 def test_a_turn_step_cannot_carry_a_speed_limit():

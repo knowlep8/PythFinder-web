@@ -100,13 +100,15 @@ def compile_drive_program(run: dict) -> dict:
     plan's own move shape, but cheap to return and exactly what
     tests/test_drive_program.py checks against build_run's own end pose.
 
-    One thing this deliberately does not do, that build_run does: an action
-    or a speed limit placed in *time* on a step that moves the robot (drive,
-    turn, toPoint, toPose) is refused with an error diagnostic rather than
-    guessed at. Step 5.2 removes time placement from the format entirely; it
-    is not done yet, so an old saved run can still describe one, and the
-    honest answer here is "not supported", not a number made up to fit. Time
-    placement inside a wait or an arm step is unaffected -- see _emit_wait.
+    An action or a speed limit placed in *time* is refused with an error
+    diagnostic rather than guessed at, on every step alike -- drive, turn,
+    toPoint, toPose, and (since step 5.2) wait too. build_run's own rejection
+    of "ms" landed alongside this: one rule now, not this module refusing it
+    on a moving step while build_run still allowed it inside a wait. Nothing
+    is lost by refusing it on a wait as well -- canCarryActions in
+    runEditor.ts never lets the editor attach an action to a wait or an
+    armStep in the first place, so this only ever fires for a hand-edited or
+    pre-5.2 saved run. See _emit_wait and _reject_actions.
     """
     diagnostics = []
     moves = _Moves()
@@ -171,7 +173,8 @@ def compile_drive_program(run: dict) -> dict:
                 ms_len = int(step["ms"])
 
                 _reject_speed_limits(diagnostics, step, index)
-                _emit_wait(moves, diagnostics, step, index, ms_len)
+                _reject_actions(diagnostics, step, index)
+                _emit_wait(moves, ms_len)
 
             elif kind == "armStep":
                 _reject_speed_limits(diagnostics, step, index)
@@ -395,6 +398,20 @@ def _reject_speed_limits(diagnostics: list, step: dict, index: int):
         ).as_dict())
 
 
+def _reject_actions(diagnostics: list, step: dict, index: int):
+    """A wait step has no distance to place an action against, and step 5.2
+    took time off the table -- so a wait simply cannot carry one any more.
+    canCarryActions in runEditor.ts never offers "+ action while driving" on
+    a wait, so this only ever fires for a hand-edited or pre-5.2 saved run --
+    see _emit_wait, and compile_drive_program's own note above."""
+    if step.get("actions"):
+        diagnostics.append(Diagnostic.error(
+            "an action cannot be attached to a wait step",
+            step = index,
+            suggestion = "attach it to the step before or after instead"
+        ).as_dict())
+
+
 def _emit_leg(moves: _Moves, diagnostics: list, step: dict, index: int,
              leg_len_cm: float, sign: int, heading_deg: float,
              normal_speed_mm_s: float):
@@ -505,47 +522,15 @@ def _emit_leg(moves: _Moves, diagnostics: list, step: dict, index: int,
     moves.straight((leg_len_cm - cursor) * sign * 10, heading_deg)
 
 
-def _emit_wait(moves: _Moves, diagnostics: list, step: dict, index: int,
-               ms_len: int):
-    """Split a wait step's own length around every action on it: wait(a),
-    action, wait(b), for however many actions fall inside it -- the "trivial"
-    half of step 5.4's own note on timed placement. armStep does not need
-    this: see _emit_arm."""
-    cuts = []
-
-    for order, action in enumerate(step.get("actions", [])):
-        at = action.get("at") or {}
-
-        if "ms" not in at:
-            diagnostics.append(Diagnostic.error(
-                "an action does not say when it should happen",
-                step = index).as_dict())
-            continue
-
-        value = int(at["ms"])
-        position = ms_len + value if value < 0 else value
-
-        if position < -MS_EPSILON or position > ms_len + MS_EPSILON:
-            diagnostics.append(Diagnostic.warning(
-                "an action {0}ms into this step was dropped, because the "
-                "step only goes as far as {1}ms".format(value, ms_len),
-                step = index,
-                suggestion = "put it before {0}ms, or make the step longer"
-                             .format(ms_len)).as_dict())
-            continue
-
-        cuts.append((min(max(position, 0), ms_len), order, action))
-
-    cuts.sort(key = lambda cut: (cut[0], cut[1]))
-
-    cursor = 0
-
-    for position, _order, action in cuts:
-        moves.wait(position - cursor)
-        moves.action(action)
-        cursor = position
-
-    moves.wait(ms_len - cursor)
+def _emit_wait(moves: _Moves, ms_len: int):
+    """A plain wait: the robot sits still for ms_len. Used to split around
+    every action on the step -- wait(a), action, wait(b) -- but step 5.2
+    also removed the only placement a wait step's own action could ever
+    use ("ms"), and canCarryActions in runEditor.ts never let the editor
+    attach one in the first place; see _reject_actions, called by this
+    step's own caller before this function runs. Nothing left to split
+    around, so this is just the one call."""
+    moves.wait(ms_len)
 
     if ms_len > 0:
         moves.stop()
@@ -555,7 +540,8 @@ def _process_turn_actions(moves: _Moves, diagnostics: list, step: dict, index: i
     """A turn covers no distance, so the only moment an action on one can
     mean is its very start, before any turning happens -- cm: 0. Anything
     else is a step ahead of itself, and gets a warning rather than being
-    silently moved (5.2's own rule, applied here ahead of that step landing).
+    silently moved -- the same rule step 5.2 now applies in headless.py too
+    (see _warn_if_turn_action_off_start there).
     """
     for action in step.get("actions", []):
         at = action.get("at") or {}

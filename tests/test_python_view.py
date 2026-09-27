@@ -68,7 +68,11 @@ def test_builder_source_is_present_and_runs():
 
 
 def test_the_chain_matches_build_run_on_the_template_run():
-    """The run every team member starts from, not a toy case."""
+    """The run every team member starts from, not a toy case.
+
+    "Left arm up" used to be placed with {"ms": -1} -- step 5.2 removed time
+    placement, so this is {"cm": -1} now, the same "1 before the end" idiom
+    in distance instead of time (see headless.py's own TEMPLATE_RUN)."""
     result = build([
         {"type": "drive", "cm": 75, "actions": [
             {"id": "a1", "at": {"cm": 35}, "label": "Left arm down",
@@ -76,7 +80,7 @@ def test_the_chain_matches_build_run_on_the_template_run():
         {"type": "wait", "ms": 600},
         {"type": "turn", "deg": 90},
         {"type": "drive", "cm": 30, "actions": [
-            {"id": "a2", "at": {"ms": -1}, "label": "Left arm up",
+            {"id": "a2", "at": {"cm": -1}, "label": "Left arm up",
              "do": {"motor": "leftTask", "call": "run", "speed": -500}}]},
         {"type": "toPose", "x": 0, "y": 0, "head": 0},
     ], start={"x": -46, "y": -83, "head": 0})

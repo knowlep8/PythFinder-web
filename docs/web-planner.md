@@ -1437,7 +1437,7 @@ partway through a turn.
     end-position spread says whether `DriveBase` is at least as repeatable.
     If it is not, stop and rethink before 5.2.
 
-- [ ] **5.2 Remove timed triggers from the run format.**
+- [x] **5.2 Remove timed triggers from the run format.**
   - `build_run` rejects `at: {ms}` on an action with a clear diagnostic, and
     speed limits accept only `cm`. The `armStep`'s own implicit marker is
     internal and unaffected (and goes away in 5.4 anyway).
@@ -1460,6 +1460,166 @@ partway through a turn.
   file format" section below are already updated; this step's own remaining
   work (rejecting `at: {ms}`, the `turn` rule, the Firestore query for any
   saved `ms` placement) does not touch `version` again when it lands.
+
+  **`headless.py`: one raw-level check, ahead of everything else.** Every
+  action's *raw* `at` — the one a person or an old saved run actually wrote,
+  before `_at_within_step` gets to it — is checked for `"ms"` first thing in
+  `build_run`'s own loop, and refused with a diagnostic naming the step
+  ("give it a distance into the step instead") if it has one. Checking the
+  raw value rather than whatever `_at_within_step` computes is what keeps
+  the armStep's own implicit marker exempt without a special case: that
+  marker is synthesised from `at is None`, never from a raw `"ms"`, so it
+  never reaches the check at all. The same raw check runs on a speed limit's
+  `from`/`to` in `_add_speed_limit`, which also dropped its now-dead
+  temporal branches (`addRelativeTemporalConstraints` and the chain line
+  that named it) — only `addRelativeDisplacementConstraints` is reachable
+  once `"ms"` is refused up front.
+
+  **A turn's own `cm` action needed real support, not just a rule.** Before
+  this step, a cm-based action on a turn silently never fired at all — the
+  floating-point sliver 3.2 documented (`19.999997... -> 20.0`) means almost
+  no real `cm` value lands inside an `AngularSegment`'s own displacement
+  range, `cm: 0` included. `_at_within_step` now recognises `kind == "turn"`
+  and routes it through a *temporal* marker instead (`{"ms": into_wait}`,
+  always 0 for a turn since `into_wait` resets at the top of the loop for
+  anything that is not a wait or an armStep) — the segment's elapsed time is
+  reliable where its displacement is not. The `cm` value itself is only
+  ever checked for "is this exactly 0", by `_warn_if_turn_action_off_start`,
+  which warns rather than drops: "an action on a turn only ever fires at its
+  start" / "move it to the next step" — worded to match
+  `driveProgram.py`'s own `_process_turn_actions`, which reaches the
+  identical rule from the flat move list's own side.
+
+  **`toPoint`/`toPose` needed no code change, only proof.** The plan's own
+  claim — cm is measured along the straight part because a composite
+  `PointSegment`/`PoseSegment` is one builder segment, and its turn-to-face
+  (and, for `toPose`, its final turn) contribute only that same
+  floating-point sliver of displacement — turned out to already be true of
+  the unmodified builder. Checked by comparing, across four starting
+  headings needing nothing up to a full reversal of turning before the same
+  40cm leg, `ends_ms - marker_time` for an action at `cm: 10`: identical
+  (within 1ms, at the segment boundary) regardless of how much turning
+  preceded it, because that remainder sits entirely in the straight part,
+  which none of the turning touches. Pinned as
+  `test_toPoint_action_is_measured_along_the_straight_part_only`.
+
+  **`driveProgram.py` (5.4) agrees now instead of allowing what `headless.py`
+  refuses.** It already rejected `ms` on a moving step; its `_emit_wait` still
+  split a `wait` step's own length around a timed action, because a wait's
+  length *is* a length of time and, unlike a moving step, "ms" made some
+  sense there. But `canCarryActions` in `runEditor.ts` never lets the editor
+  attach an action to a `wait` (or an `armStep`) in the first place, so that
+  branch served a run neither the editor nor, now, `build_run` can produce —
+  one rule in one module, a different one in the other, for a case that was
+  never reachable either way. `_emit_wait` is now the one call it always
+  was underneath (`moves.wait(ms_len)`); a new `_reject_actions`, called
+  alongside the existing `_reject_speed_limits`, refuses any action on a
+  wait outright, with a diagnostic naming the step. `armStep` needed no
+  equivalent change — its own action was never split by time at all (5.4
+  made it one atomic `arm` move), and an explicit `at` of any shape already
+  triggered `_emit_arm`'s "anything else attached to it is ignored" warning.
+
+  **Every golden that used `ms` placement, accounted for, none regenerated:**
+
+  - `tests/golden_runs.py`'s own `markers_relative` and `template_run` build
+    through `TrajectoryBuilder` chain calls (`.addRelativeTemporalMarker(-1,
+    ...)`) — never through a run description — so step 5.2 does not touch
+    them at all. They keep proving the *library* still places a temporal
+    marker correctly; `tests/golden/markers_relative.txt` and
+    `tests/golden/template_run.txt`, and the byte-for-byte hub comparisons
+    in `tests/test_hub_module.py` and `tests/test_goldens.py` that are built
+    from them, are all untouched and still pass.
+  - `tests/test_headless.py`'s own `TEMPLATE_RUN` — a JSON run description,
+    not a `TrajectoryBuilder` chain — did use `{"ms": -1}` on its "arm up"
+    action, and did drive its own byte-for-byte comparison against
+    `tests/golden/hub/template_run.py`. Converted to `{"cm": -1}`, the same
+    "1 before the end" idiom in distance instead of time. That moves the
+    marker from 7942ms to 7673ms, so the comparison could no longer be
+    byte-for-byte on `MARKERS` — split into `motion_only()` (STEPS/COUNT/DATA,
+    still byte-identical, since where a marker sits changes nothing about the
+    motion) plus explicit marker-order assertions, with the reasoning
+    written into both the test and `TEMPLATE_RUN`'s own comment. The
+    byte-for-byte `MARKERS` proof against that same golden file is untouched,
+    at the library level, in `test_hub_module.py`.
+  - `tests/test_python_view.py`'s copy of the template run, and
+    `tests/test_drive_program.py`'s, both had their own `{"ms": -1}`.
+    The python-view copy converted to `{"cm": -1}` like `TEMPLATE_RUN` did.
+    The drive-program copy stayed `{"ms": -1}` on purpose — that test's whole
+    point was the *gap* between `build_run` still accepting it and this
+    module already refusing it, and closing that gap is what this step is
+    for. Renamed and rewritten to assert the closed state: both now refuse
+    it, naming the same step, with the geometry and the one placeable action
+    (`arm_down`) still agreeing between them.
+  - `tests/test_action_boundaries.py`'s `test_an_action_at_zero_milliseconds_
+    fires` pinned a boundary (`ms: 0` fires, like `cm: 0`) that no longer
+    exists to pin — rewritten as `test_an_action_placed_by_time_is_refused_
+    not_dropped`, asserting the refusal instead, with a docstring explaining
+    why "refused" is the more honest failure than the silent "dropped" this
+    module already guards against.
+  - `tests/test_speed_limits.py`'s `test_mismatched_units_is_an_error` (one
+    end `cm`, the other `ms`) is no longer about a *mismatch* — `ms` is
+    refused outright now, matched or not — renamed to
+    `test_a_time_based_limit_is_refused`, plus a new
+    `test_a_purely_temporal_limit_is_also_refused` for the case where both
+    ends agree on `ms`, which used to be accepted.
+
+  **Nine new tests beyond those conversions**, in `test_headless.py`: `ms`
+  refused on each of drive/turn/toPoint/toPose with the same diagnostic
+  shape; an old, hand-shaped `version: 1` run with an `ms` action still
+  builds and flags only that one step (the migration path, run against a
+  literal old-saved-run shape rather than inferred); a turn action at `cm: 0`
+  firing clean; a turn action off 0 firing with the warning; a speed limit
+  refused for `ms`; and the toPoint/toPose pin above.
+
+  **Web:** `RunAction.at` and `SpeedLimit.from`/`to` in `web/src/types.ts`
+  dropped their `ms?: number` field — cm-only now, matching what the editor
+  already wrote and what `build_run` now accepts. `cd web && npx tsc
+  --noEmit` passed with no changes needed anywhere else: nothing in
+  `runEditor.ts`, `main.ts` or `store.ts` ever read `.ms` off an action or a
+  limit. Checked, not just assumed, that an old saved run with `ms`
+  placement still **loads**: `store.ts`'s `looksLikeRun` only checks
+  `name`/`start`/`steps` at the top level, never an individual action's
+  shape, so nothing about a tightened type stops a v1 file with `{"ms":
+  ...}` on disk from parsing and rendering — JSON has no idea what the
+  TypeScript type says. The action's number box shows "0 cm in" for it
+  (the existing `action.at?.cm ?? 0` fallback, unchanged), and the
+  diagnostic `build_run` now returns lands on the right step through the
+  same generic `problem.step === index` filter every other diagnostic
+  already uses — nothing keyed to actions specifically. Not opened in an
+  actual browser — no way to drive Chrome from this session — so this is
+  read from the code, the way 5.3 already flagged its own UI work; worth a
+  glance at a v1 file loaded for real before relying on it.
+
+  **Firestore survey, read-only.** `web/src/firebase.ts`'s project id
+  (`pythfinder-planner`) and API key are not secrets — the comment on them
+  says so, and `firestore.rules` opens every collection to anonymous reads —
+  so a plain `POST .../documents:runQuery` against the same collection-group
+  shape the mentor view already uses (`{"structuredQuery": {"from":
+  [{"collectionId": "items", "allDescendants": true}]}}`) needed no
+  credentials. **Two saved runs exist**, `Lyla/run_a` and `paul/run_a`
+  (owner/name only — contents were not pasted anywhere, per the instruction
+  to report counts and names alone). **Neither has `ms` placement** on any
+  action or speed limit — checked by walking every `mapValue` in each run
+  for one whose only keys are `cm`/`ms` and includes `ms`, which would catch
+  an action's `at`, a limit's `from`/`to`, or a hand-edited example of
+  either. Matches the plan's own expectation (the editor never wrote one).
+  No write, update or delete call was made against the project.
+
+  **Verified:** `uv run python -m pytest tests -q` — **227 passed, 3
+  skipped, 1 xfailed**, against 218 passed / 3 skipped / 1 xfailed before
+  this step. The skips and the xfail are unchanged, both from 5.4. +9 passed
+  nets out the nine new tests above in `test_headless.py`, minus one
+  (`test_drive_program.py`'s three wait-splitting tests replaced by two
+  refusal tests), plus one (`test_speed_limits.py`'s one mismatch test
+  replaced by two refusal tests) — every other change above renamed or
+  edited an existing test in place rather than adding or removing one.
+  `cd web && npx tsc --noEmit` passes clean.
+
+  **Left for later steps, as the plan already knew.** The run-time estimate
+  is still built from the old recorded trajectory, and stays that way until
+  5.5 generates the hub file from the DriveBase move list; this step only
+  changes what a run description is allowed to *say*, not yet how it is
+  compiled for the hub.
 
 - [x] **5.3 Robot profiles and start positions: several of each, selectable,
   and addable from the page.** Replaces 4.2 and 4.3. Needed before 5.5,
@@ -1778,7 +1938,7 @@ the one bump both steps share.
     { "type": "wait", "ms": 600 },
     { "type": "turn", "deg": 90, "reversed": false },
     { "type": "drive", "cm": 30,
-      "actions": [ { "id": "a2", "at": { "ms": -1 },
+      "actions": [ { "id": "a2", "at": { "cm": -1 },
                      "do": { "motor": "leftTask", "call": "run", "speed": -500 },
                      "label": "Left arm up" } ] },
     { "type": "toPose", "x": -46, "y": -83, "head": 0 }
@@ -1790,8 +1950,18 @@ the one bump both steps share.
   `toPose` (x, y, head). `turn`, `toPoint` and `toPose` take `reversed`. There
   is no heading-mode field — step 1.1 established those collapse on a tank
   drive.
-- An action says **when** with `at`: `{"cm": 35}` into the step, or `{"ms": 40}`,
-  and negative values count back from the end of the step.
+- An action says **when** with `at`: `{"cm": 35}` into the step, and negative
+  values count back from the end of the step. `{"ms": ...}` is gone as of
+  step 5.2 — a DriveBase split has no "so many ms in" to give it. `build_run`
+  refuses one with a diagnostic naming the step rather than guessing a
+  distance, so a run saved before this step (`version` 1, or an early
+  `version` 2 from 5.3) can still load and show exactly what is wrong with
+  it. On a `turn`, only `{"cm": 0}` means anything — it fires at the turn's
+  own start, since a turn covers no distance; any other `cm` still fires
+  there, with a warning pointing at the next step. On `toPoint`/`toPose`,
+  `cm` is measured along the straight leg only — the turn-to-face before it
+  (and, for `toPose`, the turn after it) adds no displacement to count
+  against.
 - `do` and `label` are carried by the browser and written into the generated
   file in step 3; `build_run` only needs `id` and `at`.
 - `do` is either a motor command (`motor`, `call`, `speed`, `angle`) or, since

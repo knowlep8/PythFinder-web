@@ -58,11 +58,24 @@ def test_an_action_at_the_very_end_of_a_step_fires():
     assert [m["id"] for m in result["markers"]] == ["a1"]
 
 
-def test_an_action_at_zero_milliseconds_fires():
+def test_an_action_placed_by_time_is_refused_not_dropped():
+    """Step 5.2 removed time placement from the format -- what used to be a
+    boundary case ("ms: 0" fires, like "cm: 0") is now simply not offered.
+    Worth telling apart from "dropped": a dropped action still downloads a
+    file that looks right and silently does nothing (see this module's own
+    docstring); a refused one keeps the run from building at all, with a
+    diagnostic naming the step, which is the more honest failure of the two.
+    """
     result = drive_with_action({"ms": 0})
 
-    assert dropped(result) == [], "an action at 0ms was dropped"
-    assert [m["id"] for m in result["markers"]] == ["a1"]
+    assert not result["ok"]
+    assert dropped(result) == [], "should be refused outright, not dropped"
+
+    problems = [d for d in result["diagnostics"] if d["level"] == "error"]
+    assert len(problems) == 1
+    assert problems[0]["step"] == 0
+    assert "time" in problems[0]["message"]
+    assert result["markers"] == []
 
 
 def test_the_middle_of_a_step_still_works():
