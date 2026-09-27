@@ -220,6 +220,9 @@
         border-radius: 6px;
         max-width: 420px;
       }
+      /* display: flex above would otherwise beat the hidden attribute, and a
+         closed form would still show as an empty box */
+      .pickerform[hidden] { display: none; }
       .pickerform label {
         display: flex;
         align-items: center;
