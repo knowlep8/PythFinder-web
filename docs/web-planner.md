@@ -1416,8 +1416,11 @@ What this gives up, knowingly: the planner's run time becomes an estimate
 (the firmware picks its own acceleration), and an action can no longer fire
 partway through a turn.
 
-- [ ] **5.1 Prove it on the hub before building anything.** A throwaway
+- [x] **5.1 Prove it on the hub before building anything.** A throwaway
   program in the quick-start repo, not the planner.
+  *Done 2026-09-27 as far as the robot allowed — the kids started rebuilding
+  the base partway through. The design questions are answered; the
+  repeatability comparison and one check move to 5.7's robot session.*
   - A `DriveBase` on the existing drive motors: `axle_track = 160` (from
     `fll_track_width_cm`), `wheel_diameter` **measured** — no measured value
     exists yet in either repo. `use_gyro(True)`.
@@ -1436,6 +1439,58 @@ partway through a turn.
   - *Done when:* each check above has an answer written here, and the
     end-position spread says whether `DriveBase` is at least as repeatable.
     If it is not, stop and rethink before 5.2.
+
+  The program is `drivebase_test.py` in the quick-start repo: nine tests on
+  the run selector's letters, each printing its result on a line starting
+  `5.1` so the terminal can be pasted back as-is.
+
+  **Firmware: Pybricks 4.0.1** (`ci-release-101-v4.0.1 on 2026-06-24`).
+  Everything phase 5 calls is there: `then=Stop.NONE` on `straight` and
+  `turn`, `wait=False`, `use_gyro()`, `done()`, `state()`. The firmware's own
+  defaults at a 54.1mm wheel were 188mm/s, 708mm/s², 110°/s, 498°/s².
+
+  **The join is seamless.** A 600mm straight in one call slowed to 180mm/s
+  near the 300mm mark; the same distance as `straight(300, then=NONE)` +
+  `straight(300)` held 185mm/s there. Splitting a drive at an action costs
+  nothing, which is the premise of 5.4's split points.
+
+  **`settings()` works mid-motion.** Accepted between two `then=NONE`
+  straights, and it took effect: 97mm/s against 100 asked for. So a speed
+  limit is just a `settings` move at its edge, and the robot does not stop.
+
+  **Measured on the old base** — *superseded by the rebuild; kept for the
+  record and as a guide to what to expect:*
+  - Wheel diameter **54.6mm**, not the nominal 56. The first reading (38 in at
+    56) was a mis-measurement; at 54.1 three careful runs went 39½, 39¾ and 40
+    in (1003, 1010, 1016mm, mean 1010), so 54.1 × 1.010. The spread, about
+    ±6mm per metre, is how repeatable one straight is on that floor.
+  - Axle track **165.8mm**, against 160 centre to centre — tyres scrub.
+    Two runs at 54.1/162.9 read 359.1° and 354.8° for a 360, i.e. turns repeat
+    to about ±0.6%; their mean suggestion, 164.3, scaled by 54.6/54.1.
+  - A turn depends on axle track ÷ wheel diameter, so whenever the wheel
+    number changes, the axle track has to be scaled with it — the first C run
+    was taken at the wrong wheel size and would have given 168.6.
+
+  **What `turn()` is relative to after a nudge: not answered.** The one run
+  registered no nudge (89.8° before and after), and with no nudge both
+  answers predict ~180°, so the verdict it printed was noise — the program
+  now refuses a verdict under 8°. It no longer decides anything: 5.6's
+  `turn_to` works from the gyro's actual heading either way (see there).
+  Checked in 5.7's robot session instead.
+
+  **Old follow loop against DriveBase: not compared.** One follow-loop square
+  ran — 14 899ms against the plan's 14 898, ending 6.3° off in heading — before
+  the rebuild. Comparing further is not worth it now: the follow loop's own
+  calibration (`fll_real_max_velocity`, the heading PID) belongs to the old
+  base as much as the wheel does, and would need re-measuring just to lose.
+  The premise is instead checked directly on the new base in 5.7: DriveBase
+  squares, five on a full battery and five on a tired one, judged by how
+  tightly they group. 5.8 retires nothing until that passes.
+
+  **The built-in team profile keeps its placeholders** (56 / 160) rather than
+  taking the old base's numbers, which are now known to be wrong for the
+  robot the team will actually drive. The new base gets its own profile from
+  B and C.
 
 - [x] **5.2 Remove timed triggers from the run format.**
   - `build_run` rejects `at: {ms}` on an action with a clear diagnostic, and
@@ -1887,10 +1942,14 @@ partway through a turn.
     and `core.configure(...)` takes a profile's numbers from a generated
     `run()` (5.3): a new DriveBase only if wheel diameter or axle track
     changed, then `settings()` and `use_gyro()`.
-  - A `turn_to(core, deg)` helper: turns by the shortest path from the IMU's
-    *current* heading to the planned absolute one, so a drifted heading gets
-    corrected at every turn instead of carried forward. Unless 5.1 shows
-    `DriveBase` already does that.
+  - A `turn_to(core, deg, by)` helper, working from the IMU's *actual*
+    heading so a drift gets corrected at every turn instead of carried
+    forward. Of all the rotations that land on `deg` from where the robot
+    really is — `wrap(deg - heading) + 360k` — it takes the one closest to
+    the planned `by`. That is the shortest way when the plan was, the long
+    way when a `reversed` turn planned one, and a small correction on top
+    either way. Correct whatever `turn()` is relative to, which is why 5.1's
+    unanswered nudge test no longer decides anything here.
   - **Note (from 5.4): a `turn_to` move's `by` is not a suggestion.** Where
     `abs(by) > 180`, or its sign disagrees with the shortest path from the
     hub's own current heading, this helper's "always shortest" default is
@@ -1910,9 +1969,15 @@ partway through a turn.
     memory budget) becomes unnecessary; strike it.
   - The playback and run time are labelled as an estimate.
   - *Done when:* verified in the browser, and "Done on the robot" as in 2.7.
+  - **The robot session left over from 5.1**, on the rebuilt base, with
+    `drivebase_test.py`: B three times and C twice, for the new base's
+    profile (scale the axle track with the wheel, as 5.1 found); F with a
+    real twist; and the DriveBase square (H or I) five times on a full
+    battery and five on a tired one. The groups have to be tight — that is
+    the premise of the whole phase, and 5.8 waits on it.
 
-- [ ] **5.8 Retire the recorded format.** Once no run on the hub imports
-  `Trajectory`: decide whether `hubModule.py` and the hub's `trajectory.py`
+- [ ] **5.8 Retire the recorded format.** Once 5.7's robot session has
+  passed and no run on the hub imports `Trajectory`: decide whether `hubModule.py` and the hub's `trajectory.py`
   go, or stay for a future spline step. Nothing else depends on them.
 
 ---
