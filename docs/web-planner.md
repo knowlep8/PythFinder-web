@@ -2078,8 +2078,12 @@ partway through a turn.
     and a second C at 160.1 read 360.2° — settled. The new base is 8.7mm
     narrower in effective track than the old one, far more than scaling for
     the wheel alone would have guessed. Both numbers are in `config.py` and
-    the planner's built-in team profile, deliberately equal. Still to do: F,
-    the squares, and a downloaded run from `runs.py`.
+    the planner's built-in team profile, deliberately equal. F, with a real
+    nudge this time: turned to 90.1, pushed to 127.2, and a further
+    `turn(90)` ended at 216.7 — 127.2 + 89.5. **`turn()` counts from the
+    actual heading**, so a drift would be carried into every later turn; 5.6's
+    `turn_to`, working from the gyro each time, is what stops that. Still to
+    do: the squares, and a downloaded run from `runs.py`.
 
   **The planner-UI half is done; the robot session above is still
   outstanding** — that is what keeps this box unticked.
