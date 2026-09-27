@@ -1562,7 +1562,7 @@ partway through a turn.
   ever asks for "＋ New…" and "Edit", and built-ins cannot be removed anyway,
   so there was nothing pushing towards adding one.
 
-- [ ] **5.4 Compile a run into a move list (headless, on the PC).** A new
+- [x] **5.4 Compile a run into a move list (headless, on the PC).** A new
   `pythfinder/Export/driveProgram.py`, taking the same run description as
   `build_run`.
   - Walk the steps tracking the planned pose, and emit a flat list:
@@ -1578,6 +1578,108 @@ partway through a turn.
   - *Done when:* for every golden run, the end pose implied by the move list
     matches `build_run`'s end pose to within 1 mm and 0.1°, and action order
     matches the order `build_run` fires them.
+
+  **`compile_drive_program(run)` returns `{ok, moves, diagnostics, end_pose}`,
+  not a bare list.** `build_run`'s own diagnostics-as-data shape (step 1.6)
+  fit exactly: an action a child placed in time on a moving step is an
+  ordinary planning mistake, not something to raise an exception for, and
+  `end_pose` is free to return and is exactly what a test needs to check
+  against `build_run`'s own. `moves` is the flat list the plan asked for,
+  plain dicts, one of `straight`/`turn_to`/`wait`/`action`/`arm`/`settings`.
+  An `action` move carries its own `do` and `label`, not just an `id` — unlike
+  a `build_run` marker, which leaves the hub file to look the rest up
+  afterwards, this list is everything step 5.5 needs with no second walk over
+  the original run.
+
+  **No `RobotConfig`, no `TrajectoryBuilder`, no acceleration profile.**
+  Unlike `build_run`, this module never has to know how fast the robot can
+  go, only where it ends up — the whole point of handing motion to the
+  DriveBase. Pose is tracked with plain trigonometry, matching the library's
+  own formulas line for line: `inLineCM`'s `pose + cm·(cos, sin)(head)` for a
+  drive, `pointSegment.py`'s `atan2(dy, dx)` tangent (±180° if reversed) for
+  `toPoint`/`toPose`'s facing turn, and `turnToDeg`'s target heading — a turn
+  always ends up facing `deg`, whichever way `reversed` picks to spin, so the
+  move list never has to say which direction the hub should turn (that is
+  5.6's own job, as the plan already said).
+
+  **`then` is decided by one rule, not two.** A straight gets `then: "none"`
+  whenever it flows directly out of the straight before it — same heading,
+  same direction of travel — whether that boundary came from splitting at an
+  action/speed-limit edge inside one step, or from two separate `drive` steps
+  of the same sign back to back with nothing between them: both are "one
+  straight flowing into another", checked the same way. An action or a
+  `settings` change in between does not break that continuity; a real turn, a
+  wait or an arm call does. A turn that gets *skipped* for changing nothing
+  (see below) is not a real turn, so it does not break continuity either —
+  two drives either side of a no-op turn merge exactly as if the turn had
+  never been written.
+
+  **Turns that change nothing are skipped, and `reversed` never changes where
+  a turn ends up.** `find_longest_path` (the library's own "spin the long way
+  round") still lands on the same absolute heading as `find_shortest_path` —
+  checked directly, `turnToDeg(137)` and `turnToDeg(137, reversed=True)`
+  produce byte-identical move lists here — so the move list only ever needs
+  the target, never a direction; picking the direction and turning *by* an
+  amount are 5.6's job. A turn within `HEADING_EPSILON_DEG` of the current
+  heading is skipped entirely, including when that lets two straights either
+  side of it merge into one continuous roll.
+
+  **Timed placement is trivial inside a `wait`, and refused on a moving
+  step, exactly as the plan asked.** A `wait` step's own length splits around
+  every action on it — `wait(a)`, `action`, `wait(b)`, for however many
+  actions fall inside it. A `drive`/`turn`/`toPoint`/`toPose` step with an
+  action or speed limit placed in *time* gets a clear error diagnostic naming
+  the step instead: step 5.2 removes time placement from the format
+  entirely, it just has not landed yet, so an old saved run can still
+  describe one, and the honest answer is "not supported" rather than a
+  guessed distance.
+
+  **`armStep` simplifies to one atomic `arm` move, not a wait-then-marker.**
+  The old recorded format needed a wait segment sized by `angle/speed` plus
+  an implicit marker at the moment the robot came to rest, because a marker
+  was the only way to fire code partway through a trajectory. A move list has
+  no such restriction — the arm step *is* the call, blocking (`wait: True`)
+  for as long as the motor takes — so the wait segment, the estimate that
+  sized it, and the marker are all gone. Step 5.2's own note on this ("the
+  armStep's own implicit marker is internal ... and goes away in 5.4 anyway")
+  said as much before this step existed. An explicit `do` on the armStep's
+  one action, where earlier steps allowed it, still overrides the step's own
+  motor call — kept for whoever relies on it, but more than one action, or
+  one with its own `at`, cannot be placed against a single blocking call and
+  is reported rather than guessed at.
+
+  **The normal speed a `settings` restore uses reads the robot's own
+  `driveBase.straight_speed` (step 5.3's shape) when there is one, and falls
+  back to 200mm/s — the placeholder `TEAM_ROBOT.driveBase.straight_speed` in
+  `web/src/profiles.ts` — for `"fll_team"`, the pre-5.3 bare-numbers shape, or
+  a profile saved before 5.3 added `driveBase` at all.** None of those carry
+  a number to read, and 200 is the same placeholder the browser already
+  shows, so a run built from one is not quietly assigned a different speed
+  than the page displays.
+
+  *Verified:* `uv run python -m pytest tests -q` — **205 passed, 3 skipped, 1
+  xfailed** (152 passed + 1 xfailed before this step; 3 skips are golden runs
+  with no run-description equivalent at all — `markers_absolute`,
+  `constraints_marker`, `interrupt_marker` — each built straight against
+  `TrajectoryBuilder` calls the JSON format never exposes, recorded with a
+  reason rather than left out). Every golden run that *does* have a
+  run-description shape (`line_forward/backward/merged`, `wait_merged`,
+  `turn_ccw/cw/reversed`, `to_point[_reversed]`, `to_pose[_reversed]`) has its
+  end pose checked against `build_run`'s own, well inside 1mm/0.1° — the
+  worst observed difference was 0.0006° on a `toPoint` leg, from rounding a
+  turn to 4 decimal places on the way out. `template_run` (the run the team
+  actually drives) and a cm-only cut of `markers_relative` are checked too:
+  the template run's real "arm up" action uses `{"ms": -1}` on a `drive`
+  step, which this module correctly refuses — the test asserts the refusal
+  names the right step *and* that the end pose still matches despite it,
+  since a rejected marker does not touch the geometry.
+
+  **One thing the plan did not settle, decided here:** whether an action
+  move should carry only `id` (the plan's own example) or also `do`/`label`.
+  Went with carrying both, so step 5.5 does not need a second pass over the
+  original run to look up what an action does — the same reasoning
+  `build_run`'s own `firing_order` already uses for markers, applied one step
+  earlier.
 
 - [ ] **5.5 Generate the hub file from the move list.** Same shape as step
   3.1's file — actions as functions, one `run(core)` — so `runs.py` does not
