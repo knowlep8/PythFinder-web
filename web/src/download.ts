@@ -46,7 +46,11 @@ export function nameProblem(name: string): string | null {
  * this side of the worker boundary.
  */
 export function hubCost(moduleText: string): { moves: number; bytes: number } {
-  const moves = moduleText.match(
+  // run() only: an action's own function body holds a motor call too, and
+  // counting it as well as the _action_N(core) that fires it would count
+  // one move twice
+  const run = moduleText.split("def run(core):")[1] ?? "";
+  const moves = run.match(
     /^\s*(drive\.straight\(|core\.turn_to\(|wait\(\d|drive\.settings\(|_action_\d+\(core\)|core\.\w+Task\.\w+\()/gm,
   );
 
