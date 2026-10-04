@@ -81,6 +81,11 @@ const ROBOT_FIELDS: PickerField<RobotProfile>[] = [
     get: (r) => r.planning.length_cm ?? 0,
     set: (r, v) => { r.planning.length_cm = v as number; },
   },
+  // The hub keeps its own config.py numbers for these two: Pybricks allows
+  // one DriveBase per motor for the whole program, so a run cannot change
+  // them (step 5.7's robot session, test J). They only make the hub warn
+  // when a run was planned for different ones -- said here so nobody edits
+  // them expecting the robot to change.
   {
     key: "wheel_diameter_mm", label: "wheel diameter", unit: "mm", heading: "DriveBase",
     get: (r) => r.driveBase.wheel_diameter_mm,
@@ -88,6 +93,7 @@ const ROBOT_FIELDS: PickerField<RobotProfile>[] = [
   },
   {
     key: "axle_track_mm", label: "axle track", unit: "mm", heading: "DriveBase",
+    note: "these two must match the robot's config.py — only used to warn",
     get: (r) => r.driveBase.axle_track_mm,
     set: (r, v) => { r.driveBase.axle_track_mm = v as number; },
   },

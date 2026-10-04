@@ -23,6 +23,9 @@ export interface PickerField<T> {
   kind?: "number" | "checkbox";
   /** groups fields under a small heading in the form, e.g. "DriveBase" */
   heading?: string;
+  /** a short line under the field, for when what it does is not what its
+   *  name suggests */
+  note?: string;
   get: (item: T) => number | boolean;
   set: (item: T, value: number | boolean) => void;
 }
@@ -243,6 +246,13 @@ export class ProfilePicker<T extends { name: string }> {
 
       const withUnit = field.unit === undefined ? field.label : `${field.label} (${field.unit})`;
       this.form.append(this.labelled(withUnit, box));
+
+      if (field.note !== undefined) {
+        const note = document.createElement("p");
+        note.className = "pickerfieldnote";
+        note.textContent = field.note;
+        this.form.append(note);
+      }
     }
 
     const save = document.createElement("button");
