@@ -1,9 +1,9 @@
 name: Deploy planner to Firebase Hosting
 
 # The team's network only allows *.firebaseapp.com, not *.pages.dev -- see
-# the "reach the team" row in docs/web-planner.md. This is the deploy the
-# kids actually use; deploy-pages.yaml's Cloudflare Pages deploy is kept
-# running alongside it as a mentor-only mirror, not removed.
+# the "reach the team" row in docs/web-planner.md. This is the planner's
+# only deploy; the Cloudflare Pages mirror that ran beside it was removed on
+# 2026-10-04.
 #
 # Needs one repository secret: FIREBASE_TOKEN, from `firebase login:ci` run
 # locally (interactive; the CLI cannot do this non-interactively). The

@@ -88,14 +88,14 @@ uses is **Firebase Hosting**: `.github/workflows/deploy-firebase.yaml` builds
 the wheel and the site and runs `firebase deploy` on every push to `main`,
 landing on `pythfinder-planner.firebaseapp.com`. That is the one the kids
 can actually reach -- the network their laptops are on allows
-`*.firebaseapp.com` but not `*.pages.dev`, which is why this exists
-alongside, not instead of, the Cloudflare deploy below.
+`*.firebaseapp.com` but not `*.pages.dev`.
 
-`deploy-pages.yaml` still deploys the same build to Cloudflare Pages too,
-kept running as a mentor-only mirror -- useful from anywhere that *can*
-reach it, and free to leave running since it costs nothing. Saved runs work
-identically from either host: the page talks to Firestore directly from the
-browser, not to anything specific to one deploy.
+There used to be a second deploy, to Cloudflare Pages, kept as a
+mentor-only mirror after the move to Firebase. It was removed on
+2026-10-04, along with its `_headers` and `_redirects`, once its API token
+lapsed: nobody on the team could reach it, and a failing run beside every
+real deploy was a cost, not nothing. `firebase.json` carries the same
+cache rules it had.
 
 Firebase needs, once, by hand:
 
