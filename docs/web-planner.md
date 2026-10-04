@@ -2100,11 +2100,22 @@ partway through a turn.
     since `import run_a` beside `def run_a()` lets the function replace the
     module, and a DriveBase file has no `DATA` for `Trajectory()` to read.
 
-    **Left open, deliberately:** whether a second DriveBase may take motors
-    an earlier one used. The team profile and `config.py` carry the same
-    numbers, so nothing makes one in normal use; it only matters if the team
-    adds a second profile with different wheels, and the first run with one
-    will say.
+    **A second DriveBase on the same motors: refused.** Tested the same day
+    (`drivebase_test.py`, test J): `OSError(16, 'Device or resource busy')`.
+    A motor belongs to one DriveBase for the whole program, so 5.6's
+    `configure()` could never change the wheel or axle track — any run whose
+    profile disagreed with `config.py` would have crashed on its first line.
+
+    It never needed to. A run's distances are real millimetres on the field;
+    what makes the robot drive them right is *this robot's* measured wheel
+    and track, which live in `config.py`. So `configure()` now keeps those,
+    applies the run's speeds as before, and prints a warning naming both
+    sets of numbers when the run's copy disagrees by more than 0.1mm
+    (quick-start `852726c`). **Which means a profile's `wheel_diameter_mm`
+    and `axle_track_mm` no longer steer the hub at all** — they are a record
+    of what the run was planned for, and the warning is the only thing that
+    reads them. Whether to keep them in the profile as that check, or drop
+    them, is worth deciding before more profiles get made.
 
   **The planner-UI half is done; the robot session above is still
   outstanding** — that is what keeps this box unticked.
