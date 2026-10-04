@@ -391,8 +391,10 @@ class TrajectoryBuilder():
     def __how_far_off_the_field(self, pose: Pose, half_length: float, half_width: float) -> float:
         """How far the worst corner of the robot lies past an edge, in cm.
 
-        The corners are rotated here rather than with mathEx.rotate_by, which
-        reflects as well as rotates -- see docs/web-planner.md.
+        The corners are rotated here by hand. This was written while
+        mathEx.rotate_by still reflected as well as rotating (since fixed --
+        see docs/web-planner.md); doing it inline also avoids rotate_by
+        changing the Point it is called on.
         """
         radians = math.radians(pose.head)
         cos, sin = math.cos(radians), math.sin(radians)
