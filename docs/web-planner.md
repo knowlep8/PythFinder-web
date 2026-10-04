@@ -2111,11 +2111,14 @@ partway through a turn.
     and track, which live in `config.py`. So `configure()` now keeps those,
     applies the run's speeds as before, and prints a warning naming both
     sets of numbers when the run's copy disagrees by more than 0.1mm
-    (quick-start `852726c`). **Which means a profile's `wheel_diameter_mm`
+    (quick-start `852726c`). Test J, rewritten for that and run on the hub
+    the same day: the warning printed, the same DriveBase was kept, and it
+    drove 100mm out and back without error. **Which means a profile's `wheel_diameter_mm`
     and `axle_track_mm` no longer steer the hub at all** — they are a record
     of what the run was planned for, and the warning is the only thing that
-    reads them. Whether to keep them in the profile as that check, or drop
-    them, is worth deciding before more profiles get made.
+    reads them. **Decided 2026-10-04: kept, as that check**, and the robot
+    form says so under them: "these two must match the robot's config.py —
+    only used to warn" (`78e726f`).
 
   **The planner-UI half is done; the robot session above is still
   outstanding** — that is what keeps this box unticked.
