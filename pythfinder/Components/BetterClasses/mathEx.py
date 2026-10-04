@@ -49,10 +49,13 @@ class Point():
 
 
     def rotate_by(self, rad):
+        # a rotation matrix, not a reflection: y needs +cos, not -cos. Mutates
+        # and returns self like round(), negate() and the rest of this class --
+        # see docs/web-planner.md, "Found along the way", for why that stayed.
         copy = self.x
 
         self.x = self.x * math.cos(rad) - self.y * math.sin(rad)
-        self.y = copy * math.sin(rad) - self.y * math.cos(rad)
+        self.y = copy * math.sin(rad) + self.y * math.cos(rad)
 
         return self
     
@@ -271,7 +274,7 @@ def rotate_by(rad, point: Point, origin: Point = Point(0, 0)):
     y = point.y - origin.y
 
     rotated_x = x * math.cos(rad) - y * math.sin(rad)
-    rotated_y = x * math.sin(rad) - y * math.cos(rad)
+    rotated_y = x * math.sin(rad) + y * math.cos(rad)
 
     return Point(rotated_x, rotated_y)
 

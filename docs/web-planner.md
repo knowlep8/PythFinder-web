@@ -2378,16 +2378,31 @@ None of these are caused by this work, and none of them block it.
   the final turn home, a corner of the robot sits 0.7cm past the edge of the
   mat. Worth checking against the real table, where the border wall may or may
   not be in the way; moving the start pose 1cm inwards would clear it.
-- [ ] **`rotate_by` reflects as well as rotating.** Both
-  `mathEx.Point.rotate_by` (`mathEx.py:55`) and the free `rotate_by`
-  (`mathEx.py:274`) compute `y = x·sin − y·cos`, where a rotation needs
-  `x·sin + y·cos`. As written they rotate *and* mirror across the x axis. The
-  method also mutates the point it is called on and returns it, so a caller
-  that expects a copy silently corrupts its input. Used by the holonomic
-  field-centric joystick path in `core.py:188`, which the team's tank drive
-  never reaches, and by nothing in the trajectory maths — the goldens are
-  unaffected. Step 1.6 rotates its own corners rather than depend on it. Fixing
-  it needs a look at whether any caller has been compensating for the mirror.
+- [x] **`rotate_by` reflects as well as rotating.** Fixed: both
+  `mathEx.Point.rotate_by` and the free `rotate_by` now compute
+  `y = x·sin + y·cos`. The method still mutates and returns `self` — that was
+  deliberate, not left over. Every sibling method on `Point` (`round`,
+  `negate`, `set`, `flip_coordinates`) already mutates and returns `self`, and
+  `robot.py`'s one real caller (`center_offset.copy().negate().rotate_by(...)`)
+  already calls `.copy()` first, which only makes sense if it expects
+  mutation — so matching the class's own convention was the fix, not a copy
+  nobody asked for.
+
+  The holonomic field-centric joystick path in `core.py` *was* compensating
+  for the mirror: it rotated two half-vectors by `+head` and `-head` and
+  added them, a combination that happened to cancel the old bug out exactly
+  (checked numerically over 2000 random stick/heading samples — the old
+  two-rotation formula and a single correct rotation of the combined vector
+  agree to the last bit). That workaround is gone; it is now one `rotate_by`
+  call on the combined vector, which reproduces the exact same simulator
+  behaviour. Pinned with `tests/test_rotate_by.py`: `Point(1, 0)` turns a
+  quarter-turn into `Point(0, 1)`, matching the convention
+  `__how_far_off_the_field` in `trajectoryBuilder.py` already used (`forward *
+  cos - left * sin, forward * sin + left * cos`) rather than depend on the
+  buggy method — and `Point(1, 1)` at 60° (both coordinates nonzero, so the
+  old sign bug cannot hide behind a zero) pins a value that the pre-fix
+  formula actually got wrong. No golden changed: nothing in the trajectory
+  maths calls `rotate_by`.
 - [ ] **The swerve export is malformed.** In the wheel-speeds export, the swerve
   branch formats `(power, 2)` — a tuple — where it plainly meant
   `round(power, 2)`, so a swerve robot's file gets `(46.66, 2) 30.0` instead of

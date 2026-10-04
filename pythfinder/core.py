@@ -190,10 +190,19 @@ class Simulator():
                 if self.constants.FIELD_CENTRIC.compare():
                     linear_x_multiplier, linear_y_multiplier = -left_y, left_x
                 else:
-                    rotated_vel_x = Point(x = -left_y, y = 0).rotate_by(math.radians(self.robot.pose.head))
-                    rotated_vel_y = Point(x = 0, y = -left_x).rotate_by(-math.radians(self.robot.pose.head))
-
-                    linear_x_multiplier, linear_y_multiplier = (rotated_vel_x + rotated_vel_y).tuple()
+                    # robot-centric: the stick is read in the robot's own
+                    # frame (-left_y forward, left_x to its side, matching the
+                    # field-centric branch above), then rotated by heading
+                    # into the field frame set_velocities() below expects.
+                    # Used to be two rotate_by calls at +head and -head added
+                    # together -- that combination happened to cancel out
+                    # rotate_by's old mirror bug (docs/web-planner.md, "Found
+                    # along the way"); now that rotate_by is a real rotation,
+                    # one call on the combined vector does the same thing.
+                    linear_x_multiplier, linear_y_multiplier = (
+                        Point(x = -left_y, y = left_x)
+                            .rotate_by(math.radians(self.robot.pose.head))
+                            .tuple())
 
                 angular_multiplier = right_x
 
