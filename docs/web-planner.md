@@ -2257,7 +2257,9 @@ partway through a turn.
   *2026-10-04:* `run_square` regenerated the same way as `run_a` — its
   steps recovered from its recording and checked byte for byte — so no
   run in `runs.py` uses the recorded format now. Only `example_run.py`
-  still imports `trajectory.py`.
+  still imports `trajectory.py`. Both removed from the hub program the same day
+  (quick-start `6fc25fa`), with `drivebase_test.py`'s test G, which drove
+  the square through the old loop. `hubModule.py` stays in the library.
 
 ---
 
