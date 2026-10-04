@@ -2254,6 +2254,11 @@ partway through a turn.
     imports `Trajectory`, it can go from the hub program — and should, being
     the one file there a team member could mistake for current.
 
+  *2026-10-04:* `run_square` regenerated the same way as `run_a` — its
+  steps recovered from its recording and checked byte for byte — so no
+  run in `runs.py` uses the recorded format now. Only `example_run.py`
+  still imports `trajectory.py`.
+
 ---
 
 ## Run file format
