@@ -1360,11 +1360,16 @@ Order these after watching the kids use phase 3.
   *Struck (step 5.7): the hedge above has been confirmed, not just held. A
   DriveBase file costs a few hundred bytes, not the ~15KB a recorded run
   did (step 0.1) -- there is no budget left to watch.*
-- [ ] **4.7** *(stretch)* Send straight to the hub over Web Bluetooth, the way
-  code.pybricks.com does. Needs the secure context from 2.1.
-- [ ] **4.8** Sharpen the offline story: check what actually survives a
+- [ ] ~~**4.7** *(stretch)* Send straight to the hub over Web Bluetooth, the way
+  code.pybricks.com does. Needs the secure context from 2.1.~~
+  *Dropped 2026-10-04: not wanted. Download, then upload at
+  code.pybricks.com, is the team's flow and works.*
+- [ ] ~~**4.8** Sharpen the offline story: check what actually survives a
   competition venue with no route to the host, and whether the service worker
-  from 2.9 covers it.
+  from 2.9 covers it.~~
+  *Dropped 2026-10-04: not wanted. The service worker from 2.9 stays as it
+  is; the version stamp beside the title (from the same day) is how to tell
+  when a laptop is holding an old copy.*
 
 ---
 
