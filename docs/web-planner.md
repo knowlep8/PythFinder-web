@@ -2403,14 +2403,16 @@ None of these are caused by this work, and none of them block it.
   old sign bug cannot hide behind a zero) pins a value that the pre-fix
   formula actually got wrong. No golden changed: nothing in the trajectory
   maths calls `rotate_by`.
-- [ ] **The swerve export is malformed.** In the wheel-speeds export, the swerve
-  branch formats `(power, 2)` — a tuple — where it plainly meant
-  `round(power, 2)`, so a swerve robot's file gets `(46.66, 2) 30.0` instead of
-  `46.66 30.0`. Untouched by step 1.4, which carried the line across verbatim so
-  the goldens could prove nothing changed. It affects nobody here: the team's
-  robot is a tank drive, and this branch only runs for `SwerveKinematics`.
-  Worth fixing before anyone uses the library for swerve, ideally with a golden
-  run that covers it.
+- [x] **The swerve export is malformed.** Fixed: `(power, 2)` is now
+  `round(power, 2)`, so a swerve robot's file reads `46.66 30.0` rather than
+  `(46.66, 2) 30.0`. No existing golden exercises the swerve branch — the
+  team drives tank — so `tests/test_wheel_speeds_export.py` builds a tiny
+  `SwerveKinematics` robot and a one-state run directly (no
+  `TrajectoryBuilder`/`Simulator` needed, since `TrajectoryGenerator` only
+  wants a `RobotConfig` and some `MotionState`s) and pins the exact exported
+  line, plus a `"(" not in text` check for the bug's own shape. A third test
+  exports the same state through `TankKinematics` to confirm the branch every
+  golden actually runs was not touched. All existing goldens pass unchanged.
 - [ ] **The `Trajectory` class shadows the `Trajectory` package.** Importing
   `pythfinder.Trajectory.Segments.Primitives.generic` directly fails with
   `cannot import name 'Segments' from 'Trajectory' (unknown location)`.

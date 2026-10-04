@@ -73,7 +73,7 @@ class TrajectoryGenerator():
 
             if isinstance(self.robot.kinematics, SwerveKinematics):
                 # add module angles too
-                line = ''.join("{0} {1} ".format((self.robot.to_motor_power(state.VELOCITY), 2), round(state.ANGLE, 2)) for state in wheel_states)
+                line = ''.join("{0} {1} ".format(round(self.robot.to_motor_power(state.VELOCITY), 2), round(state.ANGLE, 2)) for state in wheel_states)
             else:
                 line = ''.join(str(round(self.robot.to_motor_power(state.VELOCITY), 2)) + " " for state in wheel_states)
 
