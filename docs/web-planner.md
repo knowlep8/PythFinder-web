@@ -2413,25 +2413,33 @@ None of these are caused by this work, and none of them block it.
   line, plus a `"(" not in text` check for the bug's own shape. A third test
   exports the same state through `TankKinematics` to confirm the branch every
   golden actually runs was not touched. All existing goldens pass unchanged.
-- [ ] **The `Trajectory` class shadows the `Trajectory` package.** Importing
-  `pythfinder.Trajectory.Segments.Primitives.generic` directly fails with
-  `cannot import name 'Segments' from 'Trajectory' (unknown location)`.
+- [x] **The `Trajectory` class shadows the `Trajectory` package.** Fixed, by
+  keeping the class out of the top-level namespace rather than renaming
+  anything: `pythfinder/__init__.py`'s `from .Trajectory import *` still runs
+  first (everything else it pulls up is unaffected), but is now followed by
+  pulling the subpackage back out of `sys.modules` and rebinding `Trajectory`
+  to it. `from . import Trajectory` does *not* do that, and was tried first —
+  it resolves with `getattr()`, which by then already finds the class sitting
+  on the `pythfinder` module and just hands it straight back.
 
-  Step 1.2 blamed the editable-install shim. **That was wrong**, and step 1.8
-  disproved it: the same failure happens from a real installed wheel in a clean
-  interpreter. The actual cause is a name collision. `pythfinder/__init__.py`
-  does `from .Trajectory import *`, and among those names is the `Trajectory`
-  *class* from `trajectory.py`, which overwrites the attribute pointing at the
-  `Trajectory` *subpackage*. `pythfinder.Trajectory` is therefore a class, and
-  `import a.b.c as x` — which resolves by walking attributes — walks into it and
-  stops.
+  Nothing in this repo does `from pythfinder import Trajectory` expecting the
+  class — the only place that name is constructed is inside
+  `TrajectoryBuilder.build()`, and the one spot that shows the class by that
+  name (`fll_run_template.py`) is commented-out example text — so there was no
+  public name to preserve for it, and no caller to change. The class is still
+  reachable, just not shadowing the subpackage: `from
+  pythfinder.Trajectory.trajectory import Trajectory`.
 
-  Harmless for how the library is actually used: `from pythfinder import X` and
-  `from pythfinder.Trajectory.thing import Y` both resolve through
-  `sys.modules` and are unaffected, which is why every test and the browser
-  build pass. Fixing it means renaming one of the two, or keeping the class out
-  of the top-level namespace — worth doing before the package is published
-  again, since it makes a normal-looking import fail for no visible reason.
+  Verified with `tests/test_trajectory_package_import.py` (the exact
+  previously-failing form now imports, `pythfinder.Trajectory` is a module
+  again, and `from pythfinder import Pose, TrajectoryBuilder` — what every
+  real caller uses — still works), the full suite (`uv run python -m pytest
+  tests`, unchanged pass count beyond the new tests), `python -c "import
+  pythfinder"` and importing `pythfinder.core` plus constructing a
+  `Simulator()` (both headless, with `SDL_VIDEODRIVER=dummy`), and a built and
+  slimmed wheel imported with only itself on `sys.path` in a fresh
+  interpreter, where `pythfinder.headless.build_run()` still runs a simple
+  drive step end to end.
 
 ## Open decisions
 

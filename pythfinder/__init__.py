@@ -20,6 +20,23 @@ See docs/web-planner.md, step 1.7.
 
 from .Trajectory import *
 
+# The star import above pulls in the Trajectory *class* (trajectory.py's,
+# forwarded up through trajectoryBuilder.py's own `import *`) under the same
+# name as the Trajectory *subpackage*, so it overwrites the subpackage
+# reference that importing it a moment ago set on this module. Nothing here
+# constructs that class by name -- TrajectoryBuilder.build() is how one gets
+# made -- so put the subpackage back: that is what `import
+# pythfinder.Trajectory.<anything>` needs to find by walking attributes, and
+# what docs/web-planner.md's "Found along the way" bug was about. Fetched
+# from sys.modules rather than `from . import Trajectory`, because that form
+# resolves via getattr() first and would just hand back the class we are
+# trying to undo.
+import sys as _sys
+
+Trajectory = _sys.modules[__name__ + ".Trajectory"]
+
+del _sys
+
 
 def __getattr__(name):
     """Find a name that is not part of the planning half.
