@@ -2238,9 +2238,21 @@ partway through a turn.
   `driveProgram.py`, or the quick-start repo's own hub-side code (5.6),
   which is where that confirmation has to happen.
 
-- [ ] **5.8 Retire the recorded format.** Once 5.7's robot session has
+- [x] **5.8 Retire the recorded format.** Once 5.7's robot session has
   passed and no run on the hub imports `Trajectory`: decide whether `hubModule.py` and the hub's `trajectory.py`
   go, or stay for a future spline step. Nothing else depends on them.
+
+  **Decided 2026-10-04: both stay, for now, for different reasons.**
+  - `hubModule.py` stays in the library. Nothing in the planner calls it
+    since 5.7, but it is tested (`test_hub_module.py` still pins it against
+    the hub's own files), small, and the only way to drive something a
+    DriveBase cannot say — a real curve, if `inSpline` ever comes back.
+    Deleting it saves nothing and loses that.
+  - The hub's `trajectory.py` stays until `run_square.py`, the last
+    recorded run in `runs.py` (run D), is regenerated or dropped. `run_a`,
+    the team's only real run, is already DriveBase calls. Once nothing
+    imports `Trajectory`, it can go from the hub program — and should, being
+    the one file there a team member could mistake for current.
 
 ---
 
