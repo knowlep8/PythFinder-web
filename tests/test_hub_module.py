@@ -9,15 +9,14 @@ Two references are used, strongest first:
 
     1. tests/golden/hub/template_run.py, a copy of the traj_run_a.py actually
        running on the hub. Self-contained, so this always runs.
-    2. the real tools/txt_to_py.py, run against each golden .txt, when the
-       quick-start repo is checked out next to this one. Covers every run, and
-       skips when it is not there.
+    2. tools/txt_to_py.py, run against each golden .txt. Covers every run.
+       A frozen copy lives in tests/golden/hub/, since the quick-start
+       deleted its own when it moved to DriveBase (step 5.8).
 
 Only the first line differs, which says which tool wrote the file.
 """
 
 import importlib.util
-import os
 from pathlib import Path
 
 import pytest
@@ -29,7 +28,10 @@ from golden_runs import GOLDEN_DIR, GOLDEN_RUNS
 
 
 HUB_DIR = GOLDEN_DIR / "hub"
-TXT_TO_PY = Path(os.path.expanduser("~/pythfinder-EV3-quick-start/tools/txt_to_py.py"))
+# A copy of the quick-start's tools/txt_to_py.py, taken 2026-10-04 when the
+# quick-start dropped the recorded format and deleted it. It is the reference
+# hubModule.py was written to match, so it stays here, frozen, as that.
+TXT_TO_PY = HUB_DIR / "txt_to_py.py"
 
 
 def body(module_text: str) -> str:
@@ -103,9 +105,6 @@ def test_hub_module_code_elides_the_payload_but_keeps_everything_else():
 
 @pytest.mark.parametrize("name", sorted(GOLDEN_RUNS))
 def test_matches_txt_to_py(name):
-    if not TXT_TO_PY.exists():
-        pytest.skip("the quick-start repo is not checked out at ~/pythfinder-EV3-quick-start")
-
     txt_to_py = load_txt_to_py()
 
     steps, markers, count, payload = txt_to_py.parse(
