@@ -2001,7 +2001,8 @@ partway through a turn.
   in `tests/golden/drive/template_run.py`. Not yet reachable from the
   planner: the Download button still writes the recorded file until 5.7.
 
-- [ ] **5.6 Hub side (quick-start repo).**
+- [x] **5.6 Hub side (quick-start repo).** *Done 2026-10-04 — a regenerated
+  `run_a` drives from `runs.py`; see 5.7's robot session.*
   - `robot.py` builds `core.drive_base` from the 5.1 numbers as a default,
     and `core.configure(...)` takes a profile's numbers from a generated
     `run()` (5.3): a new DriveBase only if wheel diameter or axle track
@@ -2026,8 +2027,8 @@ partway through a turn.
     old and new files can sit in the same `runs.py`.
   - *Done when:* one regenerated run drives from `runs.py` via the selector.
 
-  **Written 2026-09-27, in the quick-start repo; not yet committed there
-  (this session could not reach that repo's git) and not yet on a hub.**
+  **Written 2026-09-27 in the quick-start repo** (committed there as
+  `61c9e3f`, with the rebuilt base's `config.py` in `1f85bad`).
   - `config.py` gains `WHEEL_DIAMETER_MM` and `AXLE_TRACK_MM` — the old
     base's 54.6 and 165.8 from 5.1 for now, marked for re-measuring on the
     rebuilt base. They are only the fallback for a run with no profile.
@@ -2055,7 +2056,7 @@ partway through a turn.
   (That one DriveBase and the follow loop's `dc()` calls can share the motors
   *is* shown: 5.1's test G.) Added to 5.7's robot session.
 
-- [ ] **5.7 Planner UI.**
+- [x] **5.7 Planner UI.**
   - Download writes the new file. The Python view (3.4) no longer needs to
     elide anything — the whole file is readable.
   - The download readout says moves and bytes, not states. Step 4.6 (hub
@@ -2082,8 +2083,28 @@ partway through a turn.
     nudge this time: turned to 90.1, pushed to 127.2, and a further
     `turn(90)` ended at 216.7 — 127.2 + 89.5. **`turn()` counts from the
     actual heading**, so a drift would be carried into every later turn; 5.6's
-    `turn_to`, working from the gyro each time, is what stops that. Still to
-    do: the squares, and a downloaded run from `runs.py`.
+    `turn_to`, working from the gyro each time, is what stops that.
+  - *Done 2026-10-04:* the DriveBase square (I) **looked good** to the team
+    — judged by eye, not the measured five-and-five the plan asked for. And
+    `run_a` drove from `runs.py` on the robot, and **worked great**.
+
+    That `run_a` was not one of the saved runs — both saved `run_a`s in
+    Firestore are the 15.6s template, and the hub's was 23.1s. Its steps
+    were recovered from the recording itself (drive 75, wait 600, turn to
+    90, drive 30, go to pose (-51.2, -83, 0), turn to 90, drive 30, turn to
+    0, drive 30); rebuilt with `build_run`, that reproduces the old `DATA`
+    byte for byte, so it is the same run. It was generated with
+    `drive_module_text` directly rather than through the Download button —
+    the same function the button calls since 5.7 — with the measured team
+    profile: 0.6KB in place of 23KB. `runs.py` imports it as `planned_a`,
+    since `import run_a` beside `def run_a()` lets the function replace the
+    module, and a DriveBase file has no `DATA` for `Trajectory()` to read.
+
+    **Left open, deliberately:** whether a second DriveBase may take motors
+    an earlier one used. The team profile and `config.py` carry the same
+    numbers, so nothing makes one in normal use; it only matters if the team
+    adds a second profile with different wheels, and the first run with one
+    will say.
 
   **The planner-UI half is done; the robot session above is still
   outstanding** — that is what keeps this box unticked.
