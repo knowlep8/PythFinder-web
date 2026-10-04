@@ -144,6 +144,11 @@ const FIRST_STEPS: RunStep[] = [
   { type: "toPose", x: -46, y: -83, head: 0 },
 ];
 
+// filled in at build time by vite.config.ts -- see plannerVersion() there
+declare const __PLANNER_VERSION__: string;
+
+(document.getElementById("version") as HTMLElement).textContent = __PLANNER_VERSION__;
+
 const canvas = document.getElementById("field") as HTMLCanvasElement;
 const stepList = document.getElementById("steps") as HTMLElement;
 const output = document.getElementById("log") as HTMLPreElement;

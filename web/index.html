@@ -15,8 +15,8 @@
         color: #e6e6e6;
       }
 
-      h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
-      p.sub { margin: 0 0 16px; color: #8a8f98; }
+      h1 { font-size: 18px; font-weight: 600; margin: 0 0 14px; }
+      h1 .version { margin-left: 8px; font-size: 12px; font-weight: 400; color: #6b7280; }
 
       .wrap { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
       .left { flex: 1 1 620px; min-width: 320px; }
@@ -302,11 +302,7 @@
     </style>
   </head>
   <body>
-    <h1>PythFinder planner</h1>
-    <p class="sub">
-      Step 3.2 — add an arm movement as its own step and the robot waits for
-      it; add one to a move and it happens while driving.
-    </p>
+    <h1>PythFinder planner <span id="version" class="version"></span></h1>
 
     <div class="save">
       <label>who's driving <input id="owner" type="text" placeholder="your name" size="12" /></label>
