@@ -2321,7 +2321,7 @@ partway through a turn.
   typing 10, clearing the box, and typing 20 (warning shown on the step)
   all did what they should. Nothing was saved to Firestore.
 
-- [ ] **6.2 Opening someone's run replaces everything.** Clicking a run in
+- [x] **6.2 Opening someone's run replaces everything.** Clicking a run in
   "All saved runs" should make the page that run, completely, at once.
   Gaps in the current click handler (`refreshAllSaved` in `main.ts`):
   - Setting `ownerBox.value` in code fires no `input` event, so the
@@ -2338,6 +2338,30 @@ partway through a turn.
   - Bring the result into view — the list sits at the bottom of the panel.
   - Check in the browser that nothing of the old run (steps, robot, start,
     name, path, Python panel) survives the click.
+
+  **Done 2026-10-05.** One gap beyond the list above: a build of the old
+  run still in the worker when the click landed counted as "the newest"
+  (the new request waits `SETTLE_MS` before it is sent), so it could draw
+  the old run's path and Python over the new one. `planner.forget()` now
+  drops any unanswered background request, and `loadRun` calls it. `loadRun`
+  also clears `latest`, the path, highlight, step times and problems, the
+  Python and chain views, and playback, so every way of opening a run gets
+  this, not just the shared list. The dropdown is refreshed for the new
+  owner and left with **nothing selected**, rather than selecting the
+  opened run as planned above: that would put Delete one click away from
+  removing someone else's run. Clicks show "opening…" at once, disable the
+  button until the fetch answers, and only the newest click is loaded. The
+  page scrolls back to the top, and the "opened" line is held until the
+  build lands, because the log is cleared when it does.
+
+  Checked in the browser (`vite preview` of a fresh build, read-only against
+  the shared store, nothing saved or deleted): with a local run selected,
+  Delete enabled and playback at 4.3s, clicking a shared run cleared the
+  selection and disabled Delete. Then, in order: "opening…" with the button
+  disabled; owner switched, Python "building…", Download disabled, playback
+  at 0; then the new build. Two quick clicks loaded the second. Joey's
+  `run_a` still had a 4.5 from/to limit, which 6.1's `upgradeRun` converted
+  on open.
 
 - [ ] **6.3 Download the Python for any saved run.** A ".py" button beside
   each entry in "All saved runs" (and for the selected run in the "saved

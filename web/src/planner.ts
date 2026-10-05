@@ -31,6 +31,8 @@ export interface Planner {
   build: (run: Run) => Promise<{ result: BuildResult; seconds: number }>;
   /** build the newest run shortly, and tell me through onResult */
   request: (run: Run) => void;
+  /** drop any requested run not yet answered: it must never be drawn */
+  forget: () => void;
   /** how many builds the worker has actually run */
   builds: () => number;
   stop: () => void;
@@ -173,6 +175,24 @@ export function createPlanner(
         waiting = null;
         sendQueued();
       }, settleMs);
+    },
+
+    /**
+     * Step 6.2: the page has just replaced its run wholesale, so a build of
+     * the old one -- queued, or already in the worker -- is not "the newest"
+     * any more, even though nothing newer has been sent yet. Without this, a
+     * build still in flight when someone's run is opened lands after it and
+     * draws the old run's path and Python over the new one. Only background
+     * requests are dropped; a build(run) promise still gets its answer.
+     */
+    forget() {
+      queued = null;
+      newestId = -1;
+
+      if (waiting !== null) {
+        clearTimeout(waiting);
+        waiting = null;
+      }
     },
 
     builds: () => builds,

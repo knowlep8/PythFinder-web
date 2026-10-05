@@ -498,10 +498,34 @@ async function main() {
    * Put a run on screen: its steps, where it starts, its robot, and its name.
    * Every way of opening a run comes through here, so this is where one saved
    * by an older page is brought up to date -- see upgradeRun.
+   *
+   * Step 6.2: and nothing of the run it replaces survives it -- not a build
+   * of the old run still in the worker, not its path, step times, problems
+   * or Python, and not where playback had got to. Until the new run's own
+   * build lands there is simply nothing drawn, which also keeps Download .py
+   * from saving the old run's file under the new run's name.
    */
   function loadRun(saved: Run) {
     const { run, notes } = upgradeRun(saved);
     loadNotes = notes;
+
+    planner.forget();
+    latest = null;
+
+    playback.pause();
+    playback.setDuration(0);
+
+    view.setPath([]);
+    view.setHighlight(null);
+    editor.setTimes([]);
+    editor.setProblems([]);
+
+    totalReadout.textContent = "—";
+    runReadout.textContent = "building…";
+    codeView.textContent = "building…";
+    chainView.textContent = "building…";
+    copyCodeButton.disabled = true;
+    copyChainButton.disabled = true;
 
     pose = { x: run.start.x, y: run.start.y, head: run.start.head };
     startName = run.start.name;
@@ -574,6 +598,9 @@ async function main() {
    * planner itself does not need, and 2.9's offline story means the page
    * must open and plan a run with no network reachable at all.
    */
+  // which click on "All saved runs" is the newest -- see its handler below
+  let opening = 0;
+
   async function refreshAllSaved() {
     const runs = await listAllRemote();
 
@@ -596,7 +623,20 @@ async function main() {
       button.title = `saved ${new Date(entry.savedAt).toLocaleString()}`;
 
       button.addEventListener("click", async () => {
+        // Step 6.2: say something straight away -- the fetch can take a
+        // moment -- and remember which click this is, so that if another
+        // run is clicked before this one arrives, this one is dropped
+        // rather than replacing the run that was clicked after it.
+        const mine = ++opening;
+        button.disabled = true;
+        log(`opening "${entry.name}" (${entry.owner})…`);
+
         const run = await openRemote(entry.owner, entry.name);
+        button.disabled = false;
+
+        if (mine !== opening) {
+          return;
+        }
 
         if (run === null) {
           log(`could not open "${entry.name}" (${entry.owner})`);
@@ -604,11 +644,21 @@ async function main() {
         }
 
         // Switching the owner box to match is what stops a mentor peeking
-        // at Amy's run from accidentally re-saving it as their own.
+        // at Amy's run from accidentally re-saving it as their own. Setting
+        // it in code fires no "input" event, so the saved-runs list is
+        // refreshed by hand -- and left with nothing selected: a selection
+        // left over from the previous owner would let Delete remove a run
+        // of that name from *this* owner's shared store.
         ownerBox.value = entry.owner;
         rememberOwner(entry.owner);
+        savedList.value = "";
+        void refreshSavedList();
+
         loadRun(run);
-        log(`opened "${entry.name}" (${entry.owner})`);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+
+        // the log is cleared when the build lands, so this waits for it
+        loadNotes = [`opened "${entry.name}" (${entry.owner})`, ...loadNotes];
       });
 
       item.append(button);
