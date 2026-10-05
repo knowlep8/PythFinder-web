@@ -73,8 +73,13 @@ class PoseSegment(MotionSegment):
 
         if time < first_angular_nr:       # all 3
                 self.primitives[0].add_constraints_segm_time(time, constraints2D)
-                self.primitives[1].add_constraints_segm_time(0, constraints2D)
-                self.primitives[2].add_constraints_segm_time(0, constraints2D)
+
+                # Neither has started yet, so both run under the new
+                # constraints from end to end: rebuild them from scratch. A
+                # profile added to a built one is lost -- generate() re-copies
+                # every built primitive with its own original constraints.
+                self.primitives[1] = LinearSegment(None, None, self.pose.point())
+                self.primitives[2] = AngularSegment(None, None, self.kinematics, self.pose.head)
 
         elif not self.linear_head:                      # segments are separated
             if time < linear_nr:          # last 2

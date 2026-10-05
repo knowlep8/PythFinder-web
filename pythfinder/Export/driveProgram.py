@@ -40,7 +40,8 @@ from pythfinder.Components.BetterClasses.mathEx import (find_longest_path,
                                                          find_shortest_path,
                                                          normalize_degres)
 from pythfinder.Trajectory.diagnostics import Diagnostic
-from pythfinder.headless import STEP_TYPES, _arm_command, pose_from_description
+from pythfinder.headless import (STEP_TYPES, _arm_command, pose_from_description,
+                                 speed_limit_of)
 
 
 # Below this many mm / ms / degrees, two numbers are the same number: nothing
@@ -100,7 +101,7 @@ def compile_drive_program(run: dict) -> dict:
     plan's own move shape, but cheap to return and exactly what
     tests/test_drive_program.py checks against build_run's own end pose.
 
-    An action or a speed limit placed in *time* is refused with an error
+    An action placed in *time* is refused with an error
     diagnostic rather than guessed at, on every step alike -- drive, turn,
     toPoint, toPose, and (since step 5.2) wait too. build_run's own rejection
     of "ms" landed alongside this: one rule now, not this module refusing it
@@ -111,7 +112,8 @@ def compile_drive_program(run: dict) -> dict:
     pre-5.2 saved run. See _emit_wait and _reject_actions.
     """
     diagnostics = []
-    moves = _Moves()
+    normal_speed = _normal_straight_speed_mm_s(run.get("robot"))
+    moves = _Moves(normal_speed)
 
     start = pose_from_description(run.get("start"))
     x, y, head = start.x, start.y, normalize_degres(start.head)
@@ -126,8 +128,6 @@ def compile_drive_program(run: dict) -> dict:
         return {"ok": False, "moves": [], "diagnostics": diagnostics,
                 "end_pose": {"x": x, "y": y, "head": head}}
 
-    normal_speed = _normal_straight_speed_mm_s(run.get("robot"))
-
     for index, step in enumerate(steps):
         if not isinstance(step, dict):
             diagnostics.append(Diagnostic.error(
@@ -137,13 +137,23 @@ def compile_drive_program(run: dict) -> dict:
 
         kind = step.get("type")
 
+        # Step 6.1: a limit is the speed for this step's whole straight part,
+        # and the robot's own speed is the "limit" of every other one -- see
+        # _Moves.speed for why that is all a limit ever needs.
+        limit_cm_s, problem = speed_limit_of(step, index)
+
+        if problem is not None:
+            diagnostics.append(problem.as_dict())
+
+        leg_speed = normal_speed if limit_cm_s is None else limit_cm_s * 10
+
         try:
             if kind == "drive":
                 cm = float(step["cm"])
                 sign = -1 if cm < 0 else 1
 
                 _emit_leg(moves, diagnostics, step, index, abs(cm), sign,
-                         head, normal_speed)
+                         head, leg_speed)
 
                 rad = math.radians(head)
                 x += cm * math.cos(rad)
@@ -161,7 +171,6 @@ def compile_drive_program(run: dict) -> dict:
                      find_shortest_path(raw_target, head))
                 target = normalize_degres(head + by)
 
-                _reject_speed_limits(diagnostics, step, index)
                 _process_turn_actions(moves, diagnostics, step, index)
 
                 if abs(by) > HEADING_EPSILON_DEG:
@@ -172,12 +181,10 @@ def compile_drive_program(run: dict) -> dict:
             elif kind == "wait":
                 ms_len = int(step["ms"])
 
-                _reject_speed_limits(diagnostics, step, index)
                 _reject_actions(diagnostics, step, index)
                 _emit_wait(moves, ms_len)
 
             elif kind == "armStep":
-                _reject_speed_limits(diagnostics, step, index)
                 _emit_arm(moves, diagnostics, step, index)
 
             elif kind == "toPoint":
@@ -191,7 +198,7 @@ def compile_drive_program(run: dict) -> dict:
                 sign = -1 if reversed_ else 1
 
                 _emit_leg(moves, diagnostics, step, index, distance, sign,
-                         head, normal_speed)
+                         head, leg_speed)
 
                 x, y = target_x, target_y
 
@@ -207,7 +214,7 @@ def compile_drive_program(run: dict) -> dict:
                 sign = -1 if reversed_ else 1
 
                 _emit_leg(moves, diagnostics, step, index, distance, sign,
-                         head, normal_speed)
+                         head, leg_speed)
 
                 x, y = target_x, target_y
 
@@ -236,6 +243,10 @@ def compile_drive_program(run: dict) -> dict:
                 "value: {0}".format(problem),
                 step = index).as_dict())
 
+    # nothing else in the program would hand the robot's own speed back
+    # after a run that ends on a limited step
+    moves.speed(normal_speed)
+
     ok = not any(problem["level"] == Diagnostic.ERROR for problem in diagnostics)
 
     return {"ok": ok,
@@ -256,10 +267,15 @@ class _Moves:
     trajectory itself comes to rest there too. An action or a settings()
     change between two straights does not break that continuity; only a real
     turn, wait or arm call does.
+
+    It also keeps track of the DriveBase's straight speed, starting from the
+    robot's own (where core.configure leaves it), so a settings() call is only
+    ever written where the speed actually changes -- see speed().
     """
 
-    def __init__(self):
+    def __init__(self, normal_speed_mm_s: float):
         self.list = []
+        self._speed_mm_s = normal_speed_mm_s
 
         # the most recently appended straight move, and the heading/sign it
         # travelled at, so the next one can tell whether it flows out of it.
@@ -310,9 +326,21 @@ class _Moves:
         self.list.append(dict(command, op = "arm"))
         self.stop()
 
-    def settings(self, straight_speed_mm_s: float):
+    def speed(self, straight_speed_mm_s: float):
+        """Drive the straights from here on at this speed -- step 6.1.
+
+        A DriveBase keeps a settings() speed until the next one, so a limit
+        on a step is just "this speed before its straight", and the next
+        step that drives at the robot's own speed is what ends it. Writing
+        it only on a change is what keeps two limited steps in a row from
+        restoring and re-slowing between them, and an unlimited run from
+        carrying any settings() call at all."""
+        if abs(straight_speed_mm_s - self._speed_mm_s) < MM_EPSILON:
+            return
+
         self.list.append({"op": "settings",
                           "straight_speed": round(straight_speed_mm_s, 3)})
+        self._speed_mm_s = straight_speed_mm_s
 
     def stop(self):
         """The robot has genuinely come to rest -- a turn, a wait, or an arm
@@ -386,18 +414,6 @@ def _turn_toward(moves: _Moves, x: float, y: float, target_x: float,
     return target
 
 
-def _reject_speed_limits(diagnostics: list, step: dict, index: int):
-    """A speed limit touches linear speed only -- offered on a turn, it
-    would look like it did something and silently not (see 4.5's own note,
-    unchanged here)."""
-    if step.get("speedLimits"):
-        diagnostics.append(Diagnostic.error(
-            "a speed limit only makes sense on a step that drives somewhere",
-            step = index,
-            suggestion = "move it to a Drive, Go to point, or Go to pose step"
-        ).as_dict())
-
-
 def _reject_actions(diagnostics: list, step: dict, index: int):
     """A wait step has no distance to place an action against, and step 5.2
     took time off the table -- so a wait simply cannot carry one any more.
@@ -414,10 +430,15 @@ def _reject_actions(diagnostics: list, step: dict, index: int):
 
 def _emit_leg(moves: _Moves, diagnostics: list, step: dict, index: int,
              leg_len_cm: float, sign: int, heading_deg: float,
-             normal_speed_mm_s: float):
+             straight_speed_mm_s: float):
     """One straight leg -- a whole `drive` step, or the straight part of a
-    `toPoint`/`toPose` -- split at every action and speed-limit edge that
-    falls on it.
+    `toPoint`/`toPose` -- at straight_speed_mm_s, split at every action
+    that falls on it.
+
+    straight_speed_mm_s is the step's own speed limit, or the robot's own
+    speed when it has none (step 6.1): a limit covers the whole leg, so it
+    never splits it -- before 6.1 a limit's from/to did, and a limit placed
+    a sliver into the leg wrote a straight(0) between two settings() calls.
 
     leg_len_cm is always positive, and is what a negative "cm" ("from the
     end") resolves against -- the same rule _at_within_step applies in
@@ -427,7 +448,9 @@ def _emit_leg(moves: _Moves, diagnostics: list, step: dict, index: int,
     toPoint/toPose measure "cm" along this same straight part, which is why
     they can share this one function with a plain drive.
     """
-    cuts = []   # (position_cm, order, kind, payload); order breaks ties
+    moves.speed(straight_speed_mm_s)
+
+    cuts = []   # (position_cm, order, action); order breaks ties
 
     for order, action in enumerate(step.get("actions", [])):
         at = action.get("at") or {}
@@ -460,64 +483,16 @@ def _emit_leg(moves: _Moves, diagnostics: list, step: dict, index: int,
                              .format(round(leg_len_cm, 2))).as_dict())
             continue
 
-        cuts.append((min(max(position, 0.0), leg_len_cm), order, "action", action))
-
-    for order, limit in enumerate(step.get("speedLimits", [])):
-        from_at = limit.get("from") or {}
-        to_at = limit.get("to") or {}
-
-        if "cm" not in from_at or "cm" not in to_at:
-            diagnostics.append(Diagnostic.error(
-                "a speed limit's start and end have to both be a distance "
-                "into the step",
-                step = index).as_dict())
-            continue
-
-        try:
-            cm_s = float(limit["cm_s"])
-        except (KeyError, TypeError, ValueError):
-            diagnostics.append(Diagnostic.error(
-                "a speed limit needs a speed", step = index).as_dict())
-            continue
-
-        if cm_s <= 0:
-            diagnostics.append(Diagnostic.error(
-                "a speed limit has to be a positive speed",
-                step = index,
-                suggestion = "pick a speed above 0 cm/s").as_dict())
-            continue
-
-        from_value, to_value = float(from_at["cm"]), float(to_at["cm"])
-        from_pos = leg_len_cm + from_value if from_value < 0 else from_value
-        to_pos = leg_len_cm + to_value if to_value < 0 else to_value
-
-        if from_pos >= to_pos:
-            diagnostics.append(Diagnostic.error(
-                "a speed limit has to end after it starts",
-                step = index,
-                suggestion = "move the end further into the step").as_dict())
-            continue
-
-        from_pos = min(max(from_pos, 0.0), leg_len_cm)
-        to_pos = min(max(to_pos, 0.0), leg_len_cm)
-
-        cuts.append((from_pos, order, "limit_start", cm_s))
-        cuts.append((to_pos, order, "limit_end", None))
+        cuts.append((min(max(position, 0.0), leg_len_cm), order, action))
 
     cuts.sort(key = lambda cut: (cut[0], cut[1]))
 
     cursor = 0.0
 
-    for position, _order, kind, payload in cuts:
+    for position, _order, action in cuts:
         moves.straight((position - cursor) * sign * 10, heading_deg)
         cursor = position
-
-        if kind == "action":
-            moves.action(payload)
-        elif kind == "limit_start":
-            moves.settings(payload * 10)   # cm/s -> mm/s
-        else:
-            moves.settings(normal_speed_mm_s)
+        moves.action(action)
 
     moves.straight((leg_len_cm - cursor) * sign * 10, heading_deg)
 

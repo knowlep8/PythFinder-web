@@ -60,9 +60,15 @@ class PointSegment(MotionSegment):
         
         time = self.normalize_segm_time(time)
 
-        if not self.state_from_pure_linear_segment(self.states[time]):
+        if (not self.state_from_pure_linear_segment(self.states[time])
+                or self.point_segm_time_2_linear_segm_time(time) <= 0):
             self.primitives[-2].add_constraints_segm_time(self.point_segm_time_2_angular_segm_time(time), constraints2D, auto_build = False)       # angular
-            self.primitives[-1].add_constraints_segm_time(0, constraints2D, auto_build = False)                                                # linear
+
+            # The straight has not started yet, so it runs under the new
+            # constraints from end to end: rebuild it from scratch. A profile
+            # added to the built one is lost -- generate() re-copies every
+            # built primitive with its own original constraints.
+            self.primitives[-1] = LinearSegment(None, None, self.point)                                                                         # linear
 
         else: self.primitives[-1].add_constraints_segm_time(self.point_segm_time_2_linear_segm_time(time), constraints2D, auto_build = False)
 

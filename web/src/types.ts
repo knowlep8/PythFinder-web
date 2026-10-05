@@ -68,26 +68,6 @@ export type StepType =
    */
   | "armStep";
 
-/**
- * A slow, careful section within one step -- step 4.5.
- *
- * Both `from` and `to` are placed the same way an action's `at` is: a
- * distance into the step, negative counting back from the end. cm-only
- * since step 5.2, the same rule and the same reason as `RunAction.at`.
- *
- * Setting a limit changes the robot's planned speed ceiling from where it
- * starts *for the rest of the run*, with no automatic reset -- so `to` is
- * not decoration, it is the marker that hands normal speed back. Leave it
- * off, or place it wrong, and the robot stays slow for everything after.
- */
-export interface SpeedLimit {
-  id: string;
-  from: { cm?: number };
-  to: { cm?: number };
-  /** the ceiling while the limit is in effect, in cm/s */
-  cm_s: number;
-}
-
 export interface RunStep {
   type: StepType;
   cm?: number;
@@ -105,8 +85,13 @@ export interface RunStep {
   angle?: number;
 
   actions?: RunAction[];
-  /** drive / toPoint / toPose only -- turning uses angular speed, not this */
-  speedLimits?: SpeedLimit[];
+  /**
+   * drive / toPoint / toPose only -- turning uses angular speed, not this.
+   * Step 6.1: the speed for this step's whole straight part, in cm/s; absent
+   * means the robot's own. Replaced 4.5's `speedLimits` from/to list, which
+   * upgradeRun (store.ts) converts when an older run is opened.
+   */
+  speedLimit_cm_s?: number;
 }
 
 export interface RobotNumbers {

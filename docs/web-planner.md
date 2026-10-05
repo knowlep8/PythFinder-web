@@ -2268,15 +2268,95 @@ partway through a turn.
 
 ---
 
+## Phase 6 — fixes from use (2026-10-05)
+
+- [x] **6.1 A speed limit covers its whole step.** 4.5's from/to section
+  was never what was wanted: a limit means "drive this step at N cm/s",
+  nothing finer. Today it also misbehaves — reported: the generated file
+  comes out as a speed change, a zero-length move, then the speed changed
+  back. And the editor's default (20 cm/s) equals the default
+  `straight_speed` (200 mm/s), so an untouched limit visibly does nothing.
+  - Format: replace `speedLimits: SpeedLimit[]` on a step with one
+    optional `speedLimit_cm_s: number`. Bump `version` to 3; migrating an
+    old step keeps the slowest `cm_s` of its limits and drops from/to
+    (and says so in the log on load).
+  - Editor (`runEditor.ts`): one "speed limit" number box on drive /
+    toPoint / toPose, empty meaning normal speed — no from/to boxes, no
+    list, no "+ speed limit" button. Default to something actually slower
+    than the robot's own speed.
+  - DriveBase export (`driveProgram.py` `_emit_leg`): when the step has a
+    limit, emit `settings(limit)` once before its straight and
+    `settings(normal)` once after — no splitting the leg for it, so no
+    zero-length straights. Actions still split the leg as now. Two limited
+    steps in a row should not restore-then-reset between them. The turn
+    on toPoint/toPose is angular, so it is not covered — say so in the
+    editor's tooltip.
+  - Planner side (`headless.py` `_add_speed_limit`): one constraint at the
+    step's start, normal restored at its end, so the field preview and
+    time estimate match what the hub does.
+  - Tests: rewrite `test_speed_limits.py` around the new shape, plus one
+    pinning the exact move list (settings, straight, settings — no 0mm
+    straight) and one for the version-2 migration.
+
+  **Done 2026-10-05.** The reported file (`run_a.py`: `settings(20)`,
+  `straight(0, then=Stop.NONE)`, `settings(200)`) is what a 2 cm/s limit
+  gives when its `to` sits a sliver past its `from`: `_emit_leg` cut the leg
+  there, and the sliver rounded to 0 in the file. That is the likely cause;
+  the saved run itself was not inspected. Now `_Moves.speed()` writes `settings()`
+  only where the speed changes, and `_emit_leg` never splits for a limit.
+  Also found and fixed: `PointSegment`/`PoseSegment.generate()` re-copied
+  their built primitives with the primitives' original constraints, so a
+  constraint added to a toPoint/toPose was dropped. A limit there never
+  changed the preview, under 4.5 either. Now, when the constraint lands
+  before the straight starts, the straight is rebuilt under the new
+  constraints. A constraint part-way *into* the straight is still dropped,
+  as before, but nothing in the run format can place one there any more.
+  The editor default question went away: an empty box means normal speed,
+  and a limit no slower than the robot's `straight_speed` is a warning.
+  Python tests: 258 passed (256 before). Checked in the browser (`vite
+  preview` of a fresh build with a freshly slimmed wheel): a planted
+  version-2 run with two from/to limits on a Go to point opened as one
+  2 cm/s limit with a note in the log and autosaved as version 3; the
+  Python panel showed one `settings` before the straight and none between;
+  typing 10, clearing the box, and typing 20 (warning shown on the step)
+  all did what they should. Nothing was saved to Firestore.
+
+- [ ] **6.2 Opening someone's run replaces everything.** Clicking a run in
+  "All saved runs" should make the page that run, completely, at once.
+  Gaps in the current click handler (`refreshAllSaved` in `main.ts`):
+  - Setting `ownerBox.value` in code fires no `input` event, so the
+    "saved runs" dropdown keeps the *previous* owner's list and selection.
+    Delete then acts on that stale selection but with the new owner — it
+    can remove a same-named run from someone else's shared store. Refresh
+    the dropdown and select the opened run.
+  - Nothing shows while `openRemote` is in flight. Give the click
+    immediate feedback and ignore a stale answer if another run was
+    clicked meanwhile.
+  - Reset what `loadRun` leaves behind: playback position/scrubber, the
+    previous build result (`latest`, so Download .py cannot save the old
+    run's file under the new name), the selected waypoint.
+  - Bring the result into view — the list sits at the bottom of the panel.
+  - Check in the browser that nothing of the old run (steps, robot, start,
+    name, path, Python panel) survives the click.
+
+- [ ] **6.3 Download the Python for any saved run.** A ".py" button beside
+  each entry in "All saved runs" (and for the selected run in the "saved
+  runs" dropdown): fetch the run, build it with `planner.build(run)` —
+  which answers for that one run without touching what is on screen — and
+  save its `module_text` as `<name>.py` via `saveModule`. Same rule as the
+  main Download: if the build has errors, log them and save nothing.
+
+---
+
 ## Run file format
 
 As implemented in step 1.7, and step 5.3's addition of named robot profiles
 and start positions. `version` follows step 5.2's own note above: this is
-the one bump both steps share.
+the one bump both steps share. Step 6.1's whole-step speed limit is version 3.
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "name": "run_a",
   "robot": "fll_team",
   "steps_ms": 6,
@@ -2292,7 +2372,7 @@ the one bump both steps share.
       "actions": [ { "id": "a2", "at": { "cm": -1 },
                      "do": { "motor": "leftTask", "call": "run", "speed": -500 },
                      "label": "Left arm up" } ] },
-    { "type": "toPose", "x": -46, "y": -83, "head": 0 }
+    { "type": "toPose", "x": -46, "y": -83, "head": 0, "speedLimit_cm_s": 10 }
   ]
 }
 ```
@@ -2313,6 +2393,12 @@ the one bump both steps share.
   `cm` is measured along the straight leg only — the turn-to-face before it
   (and, for `toPose`, the turn after it) adds no displacement to count
   against.
+- `speedLimit_cm_s` (step 6.1), on `drive`, `toPoint` and `toPose` only, is
+  the speed for the step's whole straight part; absent means the robot's own.
+  The turns on `toPoint`/`toPose` are not slowed — it is linear speed only.
+  It replaced 4.5's `speedLimits` list of from/to sections, which `build_run`
+  now refuses with an error; the page converts one when a run is opened
+  (`upgradeRun` in `store.ts`), keeping the slowest of a step's limits.
 - `do` and `label` are carried by the browser and written into the generated
   file in step 3; `build_run` only needs `id` and `at`.
 - `do` is either a motor command (`motor`, `call`, `speed`, `angle`) or, since
@@ -2350,7 +2436,7 @@ the one bump both steps share.
   pickers.
 - `version` lets us migrate old saved runs when the format changes. 1 → 2 is
   step 5.3's format (this section), landed ahead of step 5.2's own reason for
-  the same bump — see 5.2's note above.
+  the same bump — see 5.2's note above. 2 → 3 is step 6.1's speed limit.
 
 ---
 

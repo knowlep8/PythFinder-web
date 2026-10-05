@@ -26,7 +26,6 @@ import type {
   BuiltStep,
   Diagnostic,
   RunStep,
-  SpeedLimit,
   StepType,
 } from "./types";
 import { isCode } from "./types";
@@ -189,7 +188,7 @@ function canCarryActions(type: StepType): boolean {
 }
 
 /**
- * Steps a speed limit makes sense on -- step 4.5.
+ * Steps a speed limit makes sense on -- steps 4.5 and 6.1.
  *
  * Narrower than canCarryActions: a limit only ever touches *linear* speed,
  * so it has nothing to do on a turn, which moves the robot with angular
@@ -540,88 +539,57 @@ export class RunEditor {
     // A limit only touches linear speed, so it is offered on fewer steps
     // than a parallel action -- see canCarrySpeedLimit.
     if (canCarrySpeedLimit(step.type)) {
-      (step.speedLimits ?? []).forEach((_, which) => {
-        row.append(this.renderSpeedLimit(index, which));
-      });
-
-      const add = document.createElement("div");
-      add.className = "addaction";
-      add.append(
-        this.button("+ speed limit", "slow down for part of this move", () =>
-          this.addSpeedLimit(index),
-        ),
-      );
-      row.append(add);
+      row.append(this.renderSpeedLimit(index));
     }
 
     return row;
   }
 
-  /** A slow, careful section within this step -- step 4.5. */
-  private renderSpeedLimit(index: number, which: number): HTMLElement {
-    const limit = (this.steps[index].speedLimits ?? [])[which];
+  /**
+   * This step's speed limit -- step 6.1: the whole step's straight part, or
+   * nothing. Empty means the robot's own speed, which is why this is not
+   * this.number(): that reads an emptied box as 0.
+   */
+  private renderSpeedLimit(index: number): HTMLElement {
+    const limit = this.steps[index].speedLimit_cm_s;
+
+    const box = document.createElement("input");
+    box.type = "number";
+    box.min = "1";
+    box.step = "5";
+    box.placeholder = "normal";
+    box.value = limit === undefined ? "" : String(limit);
+    box.title =
+      "drive this step's straight part at this speed -- empty for the robot's " +
+      "normal speed. Turning is not slowed.";
+
+    // typing changes the run but must not redraw this list
+    box.addEventListener("input", () => {
+      const step = this.steps[index];
+
+      if (box.value.trim() === "") {
+        delete step.speedLimit_cm_s;
+      } else {
+        const typed = Number(box.value);
+
+        if (!Number.isFinite(typed)) {
+          return;
+        }
+
+        step.speedLimit_cm_s = typed;
+      }
+
+      this.changed();
+    });
+
+    const wrapper = document.createElement("label");
+    wrapper.append(document.createTextNode("↳ speed limit"), box, document.createTextNode("cm/s"));
 
     const line = document.createElement("div");
     line.className = "action speedlimit";
-
-    line.append(document.createTextNode("↳ slow to"));
-
-    line.append(
-      this.number(String(limit.cm_s), "cm/s", 5, (value) => {
-        this.setSpeedLimit(index, which, { cm_s: value });
-      }),
-    );
-
-    line.append(document.createTextNode("from"));
-    line.append(
-      this.number(String(limit.from.cm ?? 0), "cm in", 1, (value) => {
-        this.setSpeedLimit(index, which, { from: { cm: value } });
-      }),
-    );
-
-    line.append(document.createTextNode("to"));
-    line.append(
-      this.number(String(limit.to.cm ?? 0), "cm in", 1, (value) => {
-        this.setSpeedLimit(index, which, { to: { cm: value } });
-      }),
-    );
-
-    line.append(
-      this.button("✕", "remove this speed limit", () => this.removeSpeedLimit(index, which)),
-    );
+    line.append(wrapper);
 
     return line;
-  }
-
-  private setSpeedLimit(index: number, which: number, change: Partial<SpeedLimit>) {
-    const limits = this.steps[index].speedLimits;
-
-    if (!limits) {
-      return;
-    }
-
-    limits[which] = { ...limits[which], ...change };
-    this.changed();
-  }
-
-  private addSpeedLimit(index: number) {
-    const step = this.steps[index];
-
-    step.speedLimits = [
-      ...(step.speedLimits ?? []),
-      { id: newActionId(), from: { cm: 0 }, to: { cm: 10 }, cm_s: 20 },
-    ];
-
-    this.render();
-    this.changed();
-  }
-
-  private removeSpeedLimit(index: number, which: number) {
-    const step = this.steps[index];
-    step.speedLimits = (step.speedLimits ?? []).filter((_, at) => at !== which);
-
-    this.render();
-    this.changed();
   }
 
   /** One thing that happens while this step is running. */

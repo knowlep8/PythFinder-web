@@ -54,6 +54,8 @@ reads it, since it exists only for the browser's own pickers.
 See docs/web-planner.md, steps 1.7 and 5.3.
 """
 
+import math
+
 from pythfinder.Components.BetterClasses.mathEx import Point, Pose
 from pythfinder.Trajectory.Kinematics.TankKinematics import TankKinematics
 from pythfinder.Trajectory.constraints import Constraints2D
@@ -69,6 +71,9 @@ VERSION = 2
 DEFAULT_POSE_EVERY_MS = 20
 
 STEP_TYPES = ("drive", "wait", "turn", "toPoint", "toPose", "armStep")
+
+# the steps with a straight part, so the only ones a speed limit can slow
+DRIVING_STEPS = ("drive", "toPoint", "toPose")
 
 # A sequential arm step is given at least this long, so that a small sweep
 # still reads as a step of its own on the timeline.
@@ -154,6 +159,7 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
     # actually called, headless.py has finished loading and the cycle
     # resolves fine.
     from pythfinder.Export.driveModule import drive_module_text
+    from pythfinder.Export.driveProgram import _normal_straight_speed_mm_s
 
     diagnostics = []
 
@@ -202,6 +208,14 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
     # not among fll_run_template.py's own imports -- only worth the note when
     # a speed limit actually placed one.
     used_speed_limits = False
+
+    # Step 6.1: the speed limit the builder is currently planning at, in
+    # cm/s, or None for the robot's own. A constraint lasts until the next
+    # one (see _speed_limit_line), so only a step that wants a *different*
+    # speed from the one before it places a marker -- two limited steps in a
+    # row do not restore and re-slow between them.
+    planned_limit = None
+    normal_speed_mm_s = _normal_straight_speed_mm_s(run.get("robot"))
 
     # Step 3.4's desktop-tool view, one entry per described step: its own
     # .method(...) line, then one further-indented marker line per action.
@@ -255,11 +269,34 @@ def build_run(run: dict, pose_every_ms: int = DEFAULT_POSE_EVERY_MS) -> dict:
             if marker_line is not None:
                 block.append("    " + marker_line)
 
-        for limit in step.get("speedLimits", []):
-            chain_lines = _add_speed_limit(builder, step, limit, index, diagnostics,
-                                           robot.constraints, into_wait, into_line)
-            block.extend("    " + line for line in chain_lines)
-            used_speed_limits = used_speed_limits or bool(chain_lines)
+        limit_cm_s, problem = speed_limit_of(step, index)
+
+        if problem is not None:
+            diagnostics.append(problem)
+
+        if limit_cm_s is not None and limit_cm_s * 10 >= normal_speed_mm_s:
+            diagnostics.append(Diagnostic.warning(
+                "this speed limit is no slower than the robot's normal "
+                "speed of {0} cm/s".format(_round_speed(normal_speed_mm_s / 10)),
+                step = index,
+                suggestion = "pick a speed below {0} cm/s, or remove the limit"
+                             .format(_round_speed(normal_speed_mm_s / 10))))
+
+        if kind in DRIVING_STEPS and limit_cm_s != planned_limit:
+            start = _at_within_step({"cm": 0}, step, into_wait, into_line)
+            constraints = robot.constraints.copy()
+            planned_vel = None
+
+            if limit_cm_s is not None:
+                # no faster than the robot can plan for, whatever was typed
+                planned_vel = min(limit_cm_s, robot.constraints.linear.MAX_VEL)
+                constraints.linear.set(vel = planned_vel)
+
+            builder.addRelativeDisplacementConstraints(start["cm"], constraints)
+            block.append("    " + _speed_limit_line(start["cm"], planned_vel))
+
+            planned_limit = limit_cm_s
+            used_speed_limits = True
 
         chain_blocks.append(block)
 
@@ -722,120 +759,78 @@ def _builder_chain_text(start: dict, blocks: list, needs_constraints: bool = Fal
     return note + preamble + "\n\n" + body + "\n\n        .build())\n"
 
 
-def _speed_limit_key(at) -> str:
-    """"cm" or "ms", or None if `at` does not look like either."""
-    if not isinstance(at, dict):
-        return None
+def speed_limit_of(step: dict, index: int):
+    """This step's speed limit in cm/s, or None for the robot's own speed --
+    step 6.1. Returns (cm_s, problem): problem is a Diagnostic to record, or
+    None. Shared with driveProgram.py, so the preview and the hub file refuse
+    exactly the same limits.
 
-    if "cm" in at:
-        return "cm"
+    A limit covers the step's whole straight part, nothing finer. 4.5's
+    from/to "speedLimits" list is refused rather than guessed at: the web
+    page converts it when a run is opened (upgradeRun in store.ts), so only a
+    hand-edited or never-reopened file still has one.
+    """
+    if step.get("speedLimits"):
+        return None, Diagnostic.error(
+            "this step's speed limit is in an old format, from before a limit "
+            "covered the whole step",
+            step = index,
+            suggestion = "open the run in the planner again to convert it")
 
-    if "ms" in at:
-        return "ms"
+    raw = step.get("speedLimit_cm_s")
 
-    return None
+    if raw is None:
+        return None, None
+
+    if step.get("type") not in DRIVING_STEPS:
+        return None, Diagnostic.error(
+            "a speed limit only makes sense on a step that drives somewhere",
+            step = index,
+            suggestion = "move it to a Drive, Go to point, or Go to pose step")
+
+    try:
+        cm_s = float(raw)
+    except (TypeError, ValueError):
+        return None, Diagnostic.error("a speed limit needs a speed", step = index)
+
+    if not math.isfinite(cm_s) or cm_s <= 0:
+        return None, Diagnostic.error(
+            "a speed limit has to be a positive speed",
+            step = index,
+            suggestion = "pick a speed above 0 cm/s")
+
+    return cm_s, None
 
 
-def _chain_speed_limit_lines(resolved_from: dict, resolved_to: dict, cm_s: float) -> list:
-    """The two real .addRelativeDisplacementConstraints(...) calls a limit
-    becomes -- step 5.2 made cm the only shape a limit's from/to can take, so
-    there is only ever the one call to name here.
+def _round_speed(cm_s: float):
+    """20.0 reads as 20, 12.5 stays 12.5 -- for a diagnostic's wording."""
+    rounded = round(cm_s, 1)
+    return int(rounded) if rounded == int(rounded) else rounded
 
-    Unlike an action's print() stand-in, these are the actual call the run
+
+def _speed_limit_line(cm: float, cm_s) -> str:
+    """The .addRelativeDisplacementConstraints(...) call a limit becomes in
+    the chain view -- slowing down at the start of a limited step, or (cm_s
+    None) handing the robot's own speed back at the start of the next step
+    that drives.
+
+    Unlike an action's print() stand-in, this is the actual call the run
     itself makes -- a constraint is not simulator-only, so there is nothing
     to substitute. Constraints2D() bare restores the library's own defaults,
     which is what a headless build's default robot already carries too (see
     FLL_ROBOT's own constraints in robotConfig.py).
+
+    One marker per change, not a slow/restore pair per step: setting a
+    constraint changes the planned speed ceiling from that point *for the
+    rest of the run* (trajectoryBuilder.py's __process_relative_constraints,
+    `self.CONSTRAINTS = the_chosen_one.constraints`), so the next step that
+    drives at a different speed is what ends it -- exactly as the hub file's
+    drive.settings() calls do (_Moves.speed in driveProgram.py).
     """
-    call = "addRelativeDisplacementConstraints"
+    constraints = ("Constraints2D()" if cm_s is None else
+                   "Constraints2D(linear = Constraints(vel = {0}))".format(cm_s))
 
-    return [
-        ".{0}({1}, Constraints2D(linear = Constraints(vel = {2})))".format(
-            call, resolved_from["cm"], cm_s),
-        ".{0}({1}, Constraints2D())".format(call, resolved_to["cm"]),
-    ]
-
-
-def _add_speed_limit(builder: TrajectoryBuilder, step: dict, spec: dict, index: int,
-                     diagnostics: list, normal_constraints: Constraints2D,
-                     into_wait: int, into_line: float) -> list:
-    """Place one slow-then-normal pair of constraints markers -- step 4.5.
-
-    Returns the chain lines the two markers become, or an empty list if the
-    limit could not be placed at all (an error was recorded instead).
-
-    Two markers, not one: setting a constraint changes the robot's planned
-    speed ceiling from that point *forward for the rest of the run*, with no
-    automatic reset (see __process_relative_constraints in
-    trajectoryBuilder.py, `self.CONSTRAINTS = the_chosen_one.constraints`).
-    A "speed limit" reads as a section with a start and an end, so it needs a
-    marker that slows down where it starts and one that restores the robot's
-    own normal speed where it ends -- both placed through the same
-    _at_within_step every action already uses, so a limit on a merged step
-    lands exactly where 3.2 already proved an action does.
-    """
-    kind = step.get("type")
-
-    if kind not in ("drive", "toPoint", "toPose"):
-        diagnostics.append(Diagnostic.error(
-            "a speed limit only makes sense on a step that drives somewhere",
-            step = index,
-            suggestion = "move it to a Drive, Go to point, or Go to pose step"))
-        return []
-
-    from_at = spec.get("from")
-    to_at = spec.get("to")
-    from_key = _speed_limit_key(from_at)
-    to_key = _speed_limit_key(to_at)
-
-    if from_key == "ms" or to_key == "ms":
-        # step 5.2: the same rule an action's `at` follows, applied here --
-        # a speed limit's from/to are cm-only now, not "cm, or both ms".
-        diagnostics.append(Diagnostic.error(
-            "a speed limit can only be placed by distance now, not a time",
-            step = index,
-            suggestion = "give both ends a distance into the step instead"))
-        return []
-
-    if from_key is None or to_key is None:
-        diagnostics.append(Diagnostic.error(
-            "a speed limit's start and end have to both be a distance into "
-            "the step",
-            step = index,
-            suggestion = "give both a distance in cm"))
-        return []
-
-    try:
-        cm_s = float(spec["cm_s"])
-    except (KeyError, TypeError, ValueError):
-        diagnostics.append(Diagnostic.error(
-            "a speed limit needs a speed", step = index))
-        return []
-
-    if cm_s <= 0:
-        diagnostics.append(Diagnostic.error(
-            "a speed limit has to be a positive speed",
-            step = index,
-            suggestion = "pick a speed above 0 cm/s"))
-        return []
-
-    resolved_from = _at_within_step(from_at, step, into_wait, into_line)
-    resolved_to = _at_within_step(to_at, step, into_wait, into_line)
-
-    if resolved_from["cm"] >= resolved_to["cm"]:
-        diagnostics.append(Diagnostic.error(
-            "a speed limit has to end after it starts",
-            step = index,
-            suggestion = "move the end further into the step"))
-        return []
-
-    slow = normal_constraints.copy()
-    slow.linear.set(vel = cm_s)
-
-    builder.addRelativeDisplacementConstraints(resolved_from["cm"], slow)
-    builder.addRelativeDisplacementConstraints(resolved_to["cm"], normal_constraints.copy())
-
-    return _chain_speed_limit_lines(resolved_from, resolved_to, cm_s)
+    return ".addRelativeDisplacementConstraints({0}, {1})".format(cm, constraints)
 
 
 def _described_step(segment_index, segment_owner):

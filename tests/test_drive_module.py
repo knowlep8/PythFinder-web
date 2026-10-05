@@ -160,9 +160,10 @@ def test_a_code_action_is_the_teams_own_and_unguarded():
 
 
 def test_a_speed_limit_is_a_settings_change_either_side():
-    text = text_of(run_of([{"type": "drive", "cm": 60, "speedLimits": [
-        {"id": "s", "from": {"cm": 20}, "to": {"cm": 40}, "cm_s": 5}]}],
-        robot = TEAM_PROFILE))
+    text = text_of(run_of([{"type": "drive", "cm": 20},
+                           {"type": "drive", "cm": 20, "speedLimit_cm_s": 5},
+                           {"type": "drive", "cm": 20}],
+                          robot = TEAM_PROFILE))
 
     body = run_body(text)
     assert ("    drive.straight(200, then=Stop.NONE)\n"

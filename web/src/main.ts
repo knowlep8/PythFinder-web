@@ -26,8 +26,10 @@ import {
   recallWorking,
   rememberOwner,
   rememberWorking,
+  RUN_VERSION,
   saveNamed,
   saveRemote,
+  upgradeRun,
 } from "./store";
 import {
   LEFT_LAUNCH_START,
@@ -264,7 +266,13 @@ async function main() {
 
   // Whatever was being worked on last time. A closed tab should not cost a
   // team member their afternoon.
-  const restored = recallWorking();
+  const recalled = recallWorking();
+  const upgraded = recalled === null ? null : upgradeRun(recalled);
+  const restored = upgraded === null ? null : upgraded.run;
+
+  // What upgradeRun changed in the run just opened. The log is cleared on
+  // every build, so these wait for the next one and are shown once, there.
+  let loadNotes: string[] = upgraded === null ? [] : upgraded.notes;
 
   if (restored !== null) {
     pose = { x: restored.start.x, y: restored.start.y, head: restored.start.head };
@@ -425,8 +433,9 @@ async function main() {
   function currentRun(): Run {
     return {
       // step 5.3: a run now carries its own copy of a named robot profile,
-      // and (optionally) which named start it came from -- see profiles.ts
-      version: 2,
+      // and (optionally) which named start it came from -- see profiles.ts.
+      // Step 6.1: a speed limit covers its whole step -- see upgradeRun.
+      version: RUN_VERSION,
       // the name goes into the file's own docstring, so it follows the box
       name: nameProblem(nameBox.value) === null ? nameBox.value : "run",
       steps_ms: 6,
@@ -485,8 +494,15 @@ async function main() {
     applyProfilePickers();
   }
 
-  /** Put a run on screen: its steps, where it starts, its robot, and its name. */
-  function loadRun(run: Run) {
+  /**
+   * Put a run on screen: its steps, where it starts, its robot, and its name.
+   * Every way of opening a run comes through here, so this is where one saved
+   * by an older page is brought up to date -- see upgradeRun.
+   */
+  function loadRun(saved: Run) {
+    const { run, notes } = upgradeRun(saved);
+    loadNotes = notes;
+
     pose = { x: run.start.x, y: run.start.y, head: run.start.head };
     startName = run.start.name;
     robotProfile = profileFromRunRobot(run.robot);
@@ -671,6 +687,9 @@ async function main() {
       (trouble > 0 ? `, ${trouble} problem${trouble > 1 ? "s" : ""}` : "");
 
     output.textContent = "";
+
+    loadNotes.forEach(log);
+    loadNotes = [];
 
     // Anything about a particular step now sits on that step. What is left is
     // trouble with the run as a whole, which has no row to sit on.

@@ -12,7 +12,7 @@ straight against TrajectoryBuilder, using calls the JSON run format never
 exposes (addTemporalMarker/addDisplacementMarker are "final" markers with no
 "at" shape in the format at all; a bare, unpaired constraints call and a raw
 interrupt have no run-description encoding either -- the format only offers
-a paired "speed limit"). Those are recorded below as skips, with the reason,
+a whole-step speed limit). Those are recorded below as skips, with the reason,
 rather than silently left out.
 """
 
@@ -106,9 +106,9 @@ def test_to_point_tangent_head_and_to_pose_variants_are_not_separately_tested():
      "'at' shape in the run-description format -- every action the format "
      "can describe is relative to a step"),
     ("constraints_marker",
-     "a bare addRelativeDisplacementConstraints with no matching restore "
-     "has no run-description encoding -- the format only ever offers a "
-     "paired 'speed limit', from and to"),
+     "a constraints marker part-way into a segment has no run-description "
+     "encoding -- since step 6.1 the format only offers a speed limit "
+     "covering a whole step"),
     ("interrupt_marker",
      "interruptDisplacement has no run-description encoding at all; the "
      "editor never offers one"),
@@ -195,45 +195,8 @@ def test_a_drive_is_split_at_every_action():
     assert [m["then"] for m in straights] == ["none", "none", "stop"]
 
 
-def test_a_drive_is_split_at_speed_limit_edges():
-    run = run_with([{"type": "drive", "cm": 80, "speedLimits": [
-        {"id": "s1", "from": {"cm": 30}, "to": {"cm": 60}, "cm_s": 10}]}])
-
-    compiled = compile_drive_program(run)
-    assert compiled["ok"], compiled["diagnostics"]
-
-    assert [m["op"] for m in compiled["moves"]] == [
-        "straight", "settings", "straight", "settings", "straight"]
-
-    straights = ops(compiled, "straight")
-    assert [m["mm"] for m in straights] == [300.0, 300.0, 200.0]
-    assert [m["then"] for m in straights] == ["none", "none", "stop"]
-
-    settings = ops(compiled, "settings")
-    assert settings[0]["straight_speed"] == 100.0   # 10cm/s -> mm/s
-    assert settings[1]["straight_speed"] == DEFAULT_STRAIGHT_SPEED_MM_S
-
-
-def test_a_speed_limit_reads_the_robots_own_straight_speed():
-    robot = {"name": "practice bot",
-            "planning": {"track_width_cm": 16, "max_velocity_cm_s": 64.3},
-            "driveBase": {"straight_speed": 350}}
-
-    run = run_with([{"type": "drive", "cm": 80, "speedLimits": [
-        {"id": "s1", "from": {"cm": 30}, "to": {"cm": 60}, "cm_s": 10}]}],
-        robot = robot)
-
-    settings = ops(compile_drive_program(run), "settings")
-    assert settings[1]["straight_speed"] == 350.0
-
-
-def test_a_speed_limit_only_makes_sense_on_a_step_that_drives():
-    run = run_with([{"type": "turn", "deg": 90, "speedLimits": [
-        {"id": "s1", "from": {"cm": 0}, "to": {"cm": 10}, "cm_s": 10}]}])
-
-    result = compile_drive_program(run)
-    assert not result["ok"]
-    assert any("drives somewhere" in d["message"] for d in result["diagnostics"])
+# Speed limits (step 6.1) have their own file, test_speed_limits.py, which
+# checks this module's move list directly.
 
 
 # --- negative cm ("from the end") --------------------------------------------

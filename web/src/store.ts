@@ -64,6 +64,55 @@ function write(key: string, value: unknown): boolean {
   }
 }
 
+/** Bumped by step 6.1: a speed limit covers its whole step. */
+export const RUN_VERSION = 3;
+
+/** 4.5's from/to section, as a version-2 run saved it. */
+interface OldSpeedLimit {
+  from?: { cm?: number };
+  to?: { cm?: number };
+  cm_s?: number;
+}
+
+/**
+ * Bring a run saved by an older page up to date, and say what changed.
+ *
+ * Step 6.1: a speed limit used to be a list of from/to sections within a
+ * step, and is now one speed for the whole step. A step that had any keeps
+ * the slowest of them -- the cautious choice, since a section was always
+ * there to slow the robot down -- and loses where they started and ended.
+ * Every note returned is one a team member should see, since the run now
+ * drives differently from how it was saved.
+ */
+export function upgradeRun(run: Run): { run: Run; notes: string[] } {
+  const notes: string[] = [];
+
+  const steps = run.steps.map((step, index) => {
+    const { speedLimits, ...rest } = step as typeof step & { speedLimits?: OldSpeedLimit[] };
+
+    if (!Array.isArray(speedLimits)) {
+      return step;
+    }
+
+    const speeds = speedLimits
+      .map((limit) => Number(limit.cm_s))
+      .filter((cm_s) => Number.isFinite(cm_s) && cm_s > 0);
+
+    if (speeds.length === 0) {
+      return rest;
+    }
+
+    const slowest = Math.min(...speeds);
+    notes.push(
+      `step ${index + 1}: its speed limit now covers the whole step, at ${slowest} cm/s`,
+    );
+
+    return { ...rest, speedLimit_cm_s: slowest };
+  });
+
+  return { run: { ...run, steps }, notes };
+}
+
 /** Looks enough like a run to load? Anything saved by an older page may not. */
 export function looksLikeRun(value: unknown): value is Run {
   if (typeof value !== "object" || value === null) {

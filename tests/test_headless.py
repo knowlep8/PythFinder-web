@@ -429,17 +429,6 @@ def test_a_turn_action_off_its_start_still_fires_but_warns():
     assert warnings[0]["suggestion"] == "move it to the next step"
 
 
-def test_a_speed_limit_can_only_be_placed_by_distance():
-    result = build({"type": "drive", "cm": 80, "speedLimits": [
-        {"id": "s1", "from": {"ms": 100}, "to": {"ms": 500}, "cm_s": 10}]})
-
-    assert not result["ok"]
-    problems = [d for d in result["diagnostics"] if d["level"] == "error"]
-    assert len(problems) == 1
-    assert problems[0]["step"] == 0
-    assert "not a time" in problems[0]["message"]
-
-
 def test_toPoint_action_is_measured_along_the_straight_part_only():
     """The plan's own claim (docs/web-planner.md, step 5.2): a toPoint's
     initial turn-to-face adds no displacement, so "cm" measures only the

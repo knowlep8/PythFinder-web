@@ -1,170 +1,251 @@
-"""Step 4.5: a slow, careful section within one step.
+"""Step 6.1: a speed limit is the speed for one whole step.
 
-The library already has this -- addRelativeDisplacementConstraints, proven by
-the constraints_marker golden -- it has just never been reachable from a
-described run before. Setting a constraint changes the robot's planned speed
-ceiling from that point *forward for the rest of the run*, with no automatic
-reset (trajectoryBuilder.py:589, `self.CONSTRAINTS = the_chosen_one.
-constraints`). A "speed limit" block is therefore always two markers under
-one name: one that slows down where it starts, and one that restores the
-robot's own normal speed where it ends. Get the second one wrong -- drop it,
-misplace it, or forget it -- and the robot stays slow for the rest of the run,
-which is a worse and quieter failure than the limit never applying at all.
+Step 4.5 made a limit a from/to section within a step, which was never what
+was wanted -- and in the hub file a section placed a sliver into a leg came
+out as drive.settings(slow), drive.straight(0), drive.settings(normal): a
+limit that did nothing at all. Now a step carries at most one
+`speedLimit_cm_s`, covering its whole straight part.
+
+Setting a constraint changes the robot's planned speed ceiling from that
+point *forward for the rest of the run*, with no automatic reset
+(trajectoryBuilder.py's __process_relative_constraints, `self.CONSTRAINTS =
+the_chosen_one.constraints`) -- and a DriveBase's settings() speed lasts
+until the next settings() too. So a limit is one marker where its step
+starts, and the next step that drives at the robot's own speed is what ends
+it. Get that wrong and the robot stays slow for the rest of the run, which
+is a worse and quieter failure than the limit never applying at all.
 """
 
 from pythfinder import Constraints, Constraints2D, Point, Pose, TrajectoryBuilder
+from pythfinder.Export.driveProgram import compile_drive_program
 from pythfinder.Trajectory.robotConfig import FLL_ROBOT
 from pythfinder.headless import build_run
 
 
-def build(steps):
-    return build_run({
-        "version": 1,
+def run_of(steps):
+    return {
+        "version": 3,
         "name": "speed_limit",
         "steps_ms": 6,
         "robot": "fll_team",
         "start": {"x": 0, "y": 0, "head": 0},
         "steps": steps,
-    })
-
-
-def limit(from_cm=None, to_cm=None, cm_s=20, ident="s1", from_at=None, to_at=None):
-    return {
-        "id": ident,
-        "from": from_at if from_at is not None else {"cm": from_cm},
-        "to": to_at if to_at is not None else {"cm": to_cm},
-        "cm_s": cm_s,
     }
 
 
-def drive(cm, limits):
-    return {"type": "drive", "cm": cm, "speedLimits": limits}
+def build(steps):
+    return build_run(run_of(steps))
 
+
+def drive(cm, cm_s=None):
+    step = {"type": "drive", "cm": cm}
+
+    if cm_s is not None:
+        step["speedLimit_cm_s"] = cm_s
+
+    return step
+
+
+def errors(result):
+    return [d["message"] for d in result["diagnostics"] if d["level"] == "error"]
+
+
+def moves_of(steps):
+    compiled = compile_drive_program(run_of(steps))
+    assert compiled["ok"], compiled["diagnostics"]
+
+    return [(m["op"], m.get("mm", m.get("straight_speed"))) for m in compiled["moves"]
+            if m["op"] in ("straight", "settings")]
+
+
+# --- the hub file ------------------------------------------------------------
+
+def test_a_limit_is_one_settings_change_either_side_of_its_straight():
+    """The bug 6.1 fixed: no straight(0) between the two settings() calls,
+    and the leg is not split -- the whole step drives at the limit."""
+    assert moves_of([drive(80, cm_s=10)]) == [
+        ("settings", 100.0), ("straight", 800.0), ("settings", 200.0)]
+
+
+def test_the_next_unlimited_step_hands_the_normal_speed_back():
+    assert moves_of([drive(30, cm_s=10), {"type": "turn", "deg": 90}, drive(20)]) == [
+        ("settings", 100.0), ("straight", 300.0),
+        ("settings", 200.0), ("straight", 200.0)]
+
+
+def test_two_limited_steps_in_a_row_do_not_restore_between_them():
+    assert moves_of([drive(30, cm_s=10), {"type": "turn", "deg": 90},
+                     drive(20, cm_s=10)]) == [
+        ("settings", 100.0), ("straight", 300.0), ("straight", 200.0),
+        ("settings", 200.0)]
+
+
+def test_a_different_limit_on_the_next_step_changes_straight_to_it():
+    assert moves_of([drive(30, cm_s=10), drive(20, cm_s=5)]) == [
+        ("settings", 100.0), ("straight", 300.0),
+        ("settings", 50.0), ("straight", 200.0),
+        ("settings", 200.0)]
+
+
+def test_a_run_without_limits_has_no_settings_calls():
+    assert moves_of([drive(30), {"type": "turn", "deg": 90}, drive(20)]) == [
+        ("straight", 300.0), ("straight", 200.0)]
+
+
+def test_a_limit_on_toPoint_slows_its_straight_not_its_turn():
+    """The turn to face the point comes first, at the robot's own turn rate
+    -- a limit is linear speed only -- so settings() lands after it."""
+    compiled = compile_drive_program(run_of([
+        {"type": "toPoint", "x": 60, "y": 60, "speedLimit_cm_s": 10}]))
+    assert compiled["ok"], compiled["diagnostics"]
+
+    assert [m["op"] for m in compiled["moves"]] == [
+        "turn_to", "settings", "straight", "settings"]
+
+
+def test_actions_still_split_a_limited_leg():
+    compiled = compile_drive_program(run_of([{
+        "type": "drive", "cm": 60, "speedLimit_cm_s": 10,
+        "actions": [{"id": "a1", "at": {"cm": 20}}]}]))
+    assert compiled["ok"], compiled["diagnostics"]
+
+    assert [m["op"] for m in compiled["moves"]] == [
+        "settings", "straight", "action", "straight", "settings"]
+
+
+def test_the_restore_reads_the_robots_own_straight_speed():
+    run = dict(run_of([drive(80, cm_s=10)]), robot = {
+        "name": "practice bot",
+        "planning": {"track_width_cm": 16, "max_velocity_cm_s": 64.3},
+        "driveBase": {"straight_speed": 350}})
+
+    settings = [m for m in compile_drive_program(run)["moves"] if m["op"] == "settings"]
+    assert [m["straight_speed"] for m in settings] == [100.0, 350.0]
+
+
+def test_a_speed_limit_reaches_build_runs_hub_file():
+    """driveProgram.py proves the move list above; what matters here is only
+    that build_run's own wiring hands the same file over."""
+    result = build([drive(80, cm_s=10)])
+
+    assert result["ok"], result["diagnostics"]
+    assert ("    drive.settings(straight_speed=100)\n"
+            "    drive.straight(800)\n"
+            "    drive.settings(straight_speed=200)\n") in result["module_text"]
+
+
+# --- the planner's own preview ----------------------------------------------
 
 def test_a_speed_limit_slows_the_run_down():
-    plain = build([{"type": "drive", "cm": 80}])
-    slowed = build([drive(80, [limit(30, 60, cm_s=10)])])
+    plain = build([drive(80)])
+    slowed = build([drive(80, cm_s=10)])
 
     assert plain["ok"] and slowed["ok"], (plain["diagnostics"], slowed["diagnostics"])
     assert slowed["total_ms"] > plain["total_ms"]
 
 
-def test_speed_is_restored_after_the_limit_ends():
-    """The whole point of a *section*: normal speed either side of it.
+def test_speed_is_restored_on_the_next_unlimited_step():
+    """If the restore were dropped, the second drive would stay slow, and
+    the run would take as long as one where both are limited."""
+    first_only = build([drive(40, cm_s=10), {"type": "turn", "deg": 90}, drive(40)])
+    both = build([drive(40, cm_s=10), {"type": "turn", "deg": 90}, drive(40, cm_s=10)])
+    neither = build([drive(40), {"type": "turn", "deg": 90}, drive(40)])
 
-    Proved by comparing three runs of the same total distance -- a limit that
-    covers only the middle third must cost less time than one left open with
-    no restore, and more than none at all. If the restore marker were being
-    dropped, "middle only" and "open-ended" would take the same time.
-    """
-    plain = build([{"type": "drive", "cm": 90}])
-    middle_only = build([drive(90, [limit(30, 60, cm_s=10)])])
-    open_ended = build([{"type": "drive", "cm": 90, "speedLimits": [
-        {"id": "s1", "from": {"cm": 30}, "to": {"cm": 89.999}, "cm_s": 10}]}])
-
-    assert plain["ok"] and middle_only["ok"] and open_ended["ok"]
-    assert plain["total_ms"] < middle_only["total_ms"] < open_ended["total_ms"]
+    assert first_only["ok"] and both["ok"] and neither["ok"]
+    assert neither["total_ms"] < first_only["total_ms"] < both["total_ms"]
 
 
-def test_two_separate_slow_zones_on_one_step_both_apply():
-    one_zone = build([drive(120, [limit(20, 40, cm_s=10)])])
-    two_zones = build([drive(120, [limit(20, 40, cm_s=10), limit(70, 90, cm_s=10)])])
+def test_a_limit_on_the_second_of_two_merged_drives_starts_where_it_does():
+    """Two drives the builder merges into one segment: the limit has to land
+    at the second one's start within that segment, through the same
+    _at_within_step every action uses -- not at the segment's own start."""
+    second_only = build([drive(30), drive(30, cm_s=10)])
+    both = build([drive(30, cm_s=10), drive(30, cm_s=10)])
 
-    assert one_zone["ok"] and two_zones["ok"]
-    assert two_zones["total_ms"] > one_zone["total_ms"]
-
-
-def test_a_limit_on_the_second_of_two_merged_drives_still_lands_correctly():
-    """The exact machinery 3.2 fixed for actions -- speed limits ride the
-    same _at_within_step, and must be placed against the segment the same
-    way once the builder merges the two drives into one."""
-    merged = build([
-        {"type": "drive", "cm": 30},
-        drive(30, [limit(0, 15, cm_s=10)]),
-    ])
-    solo = build([drive(60, [limit(30, 45, cm_s=10)])])
-
-    assert merged["ok"] and solo["ok"], (merged["diagnostics"], solo["diagnostics"])
-    assert merged["total_ms"] == solo["total_ms"]
-
-
-def test_backwards_range_is_an_error():
-    result = build([drive(80, [limit(60, 30, cm_s=10)])])
-
-    assert not result["ok"]
-    assert any("end after it starts" in d["message"] for d in result["diagnostics"])
-
-
-def test_equal_from_and_to_is_an_error():
-    result = build([drive(80, [limit(40, 40, cm_s=10)])])
-
-    assert not result["ok"]
-
-
-def test_zero_speed_is_an_error():
-    result = build([drive(80, [limit(30, 60, cm_s=0)])])
-
-    assert not result["ok"]
-    assert any("positive speed" in d["message"] for d in result["diagnostics"])
-
-
-def test_negative_speed_is_an_error():
-    result = build([drive(80, [limit(30, 60, cm_s=-5)])])
-
-    assert not result["ok"]
-
-
-def test_a_time_based_limit_is_refused():
-    """Step 5.2: a speed limit's from/to are cm-only now, not "cm, or both
-    ms" -- so a "ms" end is refused outright, mismatched with the other end
-    or not."""
-    result = build([drive(80, [limit(from_at={"cm": 30}, to_at={"ms": 500}, cm_s=10)])])
-
-    assert not result["ok"]
-    assert any("not a time" in d["message"] for d in result["diagnostics"])
-
-
-def test_a_purely_temporal_limit_is_also_refused():
-    result = build([drive(80, [limit(from_at={"ms": 100}, to_at={"ms": 500}, cm_s=10)])])
-
-    assert not result["ok"]
-    assert any("not a time" in d["message"] for d in result["diagnostics"])
-
-
-def test_a_turn_step_cannot_carry_a_speed_limit():
-    """Turning uses angular constraints, which a speed limit does not touch --
-    offering it on a turn would silently do nothing, so it is refused instead."""
-    result = build([{"type": "turn", "deg": 90, "speedLimits": [limit(0, 45, cm_s=10)]}])
-
-    assert not result["ok"]
-    assert any("drive" in d["message"] for d in result["diagnostics"])
-
-
-def test_a_wait_step_cannot_carry_a_speed_limit():
-    result = build([{"type": "wait", "ms": 500, "speedLimits": [limit(0, 100, cm_s=10)]}])
-
-    assert not result["ok"]
-
-
-def test_a_range_past_the_end_of_the_step_is_a_warning_not_an_error():
-    """Out of range is the same class of mistake as a dropped action -- a
-    warning, so the rest of the run still builds; the wording says what it
-    actually is, not "an action" (trajectoryBuilder.py's shared message)."""
-    result = build([drive(80, [limit(30, 200, cm_s=10)])])
-
-    assert result["ok"], result["diagnostics"]
-
-    warnings = [d["message"] for d in result["diagnostics"] if d["level"] == "warning"]
-    assert any("speed limit" in message for message in warnings)
-    assert not any(message.startswith("an action") for message in warnings)
+    assert second_only["ok"] and both["ok"]
+    assert second_only["total_ms"] < both["total_ms"]
 
 
 def test_a_toPoint_step_can_carry_a_speed_limit():
-    result = build([{"type": "toPoint", "x": 0, "y": 60,
-                     "speedLimits": [limit(10, 30, cm_s=10)]}])
+    plain = build([{"type": "toPoint", "x": 0, "y": 60}])
+    slowed = build([{"type": "toPoint", "x": 0, "y": 60, "speedLimit_cm_s": 10}])
+
+    assert slowed["ok"], slowed["diagnostics"]
+    assert slowed["total_ms"] > plain["total_ms"]
+
+
+def test_a_toPose_step_can_carry_a_speed_limit():
+    """Point and pose segments both used to drop a constraint added to them
+    -- generate() re-copied their built primitives with the primitives' own
+    original constraints -- so before 6.1 a limit on either built fine and
+    changed nothing in the preview."""
+    plain = build([{"type": "toPose", "x": 40, "y": 60, "head": 90}])
+    slowed = build([{"type": "toPose", "x": 40, "y": 60, "head": 90,
+                     "speedLimit_cm_s": 10}])
+
+    assert slowed["ok"], slowed["diagnostics"]
+    assert slowed["total_ms"] > plain["total_ms"]
+
+
+def test_a_bare_step_with_no_speed_limit_is_unaffected():
+    assert build([drive(80)])["total_ms"] == build([
+        {"type": "drive", "cm": 80, "speedLimit_cm_s": None}])["total_ms"]
+
+
+# --- what is refused ---------------------------------------------------------
+
+def test_zero_speed_is_an_error():
+    result = build([drive(80, cm_s=0)])
+
+    assert not result["ok"]
+    assert any("positive speed" in message for message in errors(result))
+
+
+def test_negative_speed_is_an_error():
+    assert not build([drive(80, cm_s=-5)])["ok"]
+
+
+def test_a_speed_that_is_not_a_number_is_an_error():
+    result = build([drive(80, cm_s="fast")])
+
+    assert not result["ok"]
+    assert any("needs a speed" in message for message in errors(result))
+
+
+def test_a_turn_step_cannot_carry_a_speed_limit():
+    """Turning uses angular speed, which a limit does not touch -- offering
+    it on a turn would silently do nothing, so it is refused instead."""
+    result = build([{"type": "turn", "deg": 90, "speedLimit_cm_s": 10}])
+
+    assert not result["ok"]
+    assert any("drives somewhere" in message for message in errors(result))
+
+
+def test_a_wait_step_cannot_carry_a_speed_limit():
+    assert not build([{"type": "wait", "ms": 500, "speedLimit_cm_s": 10}])["ok"]
+
+
+def test_a_limit_no_slower_than_normal_is_a_warning():
+    """The default team robot drives at 200 mm/s -- 4.5's own default limit
+    of 20 cm/s was exactly that, so an untouched limit visibly did nothing."""
+    result = build([drive(80, cm_s=20)])
 
     assert result["ok"], result["diagnostics"]
+    assert any("no slower than the robot's normal speed of 20 cm/s" in d["message"]
+               for d in result["diagnostics"] if d["level"] == "warning")
 
+
+def test_an_old_from_to_limit_is_refused_not_guessed_at():
+    """The web page converts these when a run is opened (upgradeRun in
+    store.ts), so only a hand-edited file reaches this."""
+    result = build([{"type": "drive", "cm": 80, "speedLimits": [
+        {"id": "s1", "from": {"cm": 30}, "to": {"cm": 60}, "cm_s": 10}]}])
+
+    assert not result["ok"]
+    assert any("old format" in message for message in errors(result))
+
+
+# --- step 3.4's chain view ---------------------------------------------------
 
 def run_chain(builder_source: str):
     """Actually execute step 3.4's chain view, the way test_python_view.py's
@@ -188,41 +269,16 @@ def run_chain(builder_source: str):
 
 def test_the_chain_view_includes_a_working_speed_limit():
     """3.4's whole promise is that the chain is equivalent, not just similar
-    -- a speed limit has to prove that the same way everything else in
-    test_python_view.py does: run it for real and compare."""
-    result = build([drive(80, [limit(30, 60, cm_s=10)])])
+    -- run it for real and compare."""
+    result = build([drive(30), drive(30, cm_s=10), {"type": "turn", "deg": 90}, drive(30)])
 
     assert result["ok"], result["diagnostics"]
     assert "needs: from pythfinder import Constraints, Constraints2D" in result["builder_source"]
-    assert "addRelativeDisplacementConstraints" in result["builder_source"]
+    assert result["builder_source"].count("addRelativeDisplacementConstraints") == 2
 
     trajectory = run_chain(result["builder_source"])
     assert trajectory.TIME == result["total_ms"]
 
 
 def test_the_chain_note_is_absent_without_a_speed_limit():
-    result = build([{"type": "drive", "cm": 80}])
-
-    assert "needs:" not in result["builder_source"]
-
-
-def test_a_speed_limit_reaches_the_hub_file_as_a_settings_change():
-    """Step 5.7: build_run's module_text is the DriveBase file now, which
-    (unlike the recorded format, where a limit only changed the wheel speeds
-    baked into DATA) writes a real drive.settings(...) call at each edge --
-    driveProgram.py/driveModule.py already prove that thoroughly on their
-    own (test_drive_program.py, test_drive_module.py); what matters here is
-    only that build_run's own wiring hands the same file over."""
-    result = build([drive(80, [limit(30, 60, cm_s=10)])])
-
-    assert result["ok"], result["diagnostics"]
-    assert result["module_text"] is not None
-    assert "drive.settings(straight_speed=100)" in result["module_text"]
-
-
-def test_a_bare_step_with_no_speed_limits_is_unaffected():
-    """A run with the key absent must build exactly as it always has."""
-    with_key = build([{"type": "drive", "cm": 80, "speedLimits": []}])
-    without_key = build([{"type": "drive", "cm": 80}])
-
-    assert with_key["total_ms"] == without_key["total_ms"]
+    assert "needs:" not in build([drive(80)])["builder_source"]
