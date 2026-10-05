@@ -293,12 +293,15 @@
         max-height: 200px;
         overflow-y: auto;
       }
-      ul.all-saved li { margin: 2px 0; }
+      ul.all-saved li { margin: 2px 0; display: flex; gap: 4px; }
       ul.all-saved button {
-        width: 100%;
+        flex: 1;
+        min-width: 0;
         text-align: left;
         font-size: 12px;
       }
+      /* step 6.3: the run's own .py, beside the button that opens it */
+      ul.all-saved button.py { flex: none; }
     </style>
   </head>
   <body>
@@ -385,6 +388,7 @@
             <option value="">— saved runs —</option>
           </select>
           <button id="forget" type="button" title="delete the selected run">Delete</button>
+          <button id="savedpy" type="button" title="download the selected run's .py without opening it">.py</button>
         </div>
         <div class="save spaced-small">
           <button id="export" type="button" title="save the run as a file">Export .json</button>

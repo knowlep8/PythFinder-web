@@ -179,6 +179,7 @@ const copyChainButton = document.getElementById("copychain") as HTMLButtonElemen
 const keepButton = document.getElementById("keep") as HTMLButtonElement;
 const savedList = document.getElementById("saved") as HTMLSelectElement;
 const forgetButton = document.getElementById("forget") as HTMLButtonElement;
+const savedPyButton = document.getElementById("savedpy") as HTMLButtonElement;
 const exportButton = document.getElementById("export") as HTMLButtonElement;
 const importButton = document.getElementById("import") as HTMLButtonElement;
 const importFile = document.getElementById("importfile") as HTMLInputElement;
@@ -273,6 +274,9 @@ async function main() {
   // What upgradeRun changed in the run just opened. The log is cleared on
   // every build, so these wait for the next one and are shown once, there.
   let loadNotes: string[] = upgraded === null ? [] : upgraded.notes;
+
+  // how many runs loadRun has put on screen -- see the first build, at the end
+  let loads = 0;
 
   if (restored !== null) {
     pose = { x: restored.start.x, y: restored.start.y, head: restored.start.head };
@@ -508,6 +512,7 @@ async function main() {
   function loadRun(saved: Run) {
     const { run, notes } = upgradeRun(saved);
     loadNotes = notes;
+    loads += 1;
 
     planner.forget();
     latest = null;
@@ -568,6 +573,7 @@ async function main() {
 
     savedList.value = known.has(chosen) ? chosen : "";
     forgetButton.disabled = savedList.value === "";
+    savedPyButton.disabled = savedList.value === "";
 
     const owner = ownerBox.value.trim();
 
@@ -598,6 +604,48 @@ async function main() {
    * planner itself does not need, and 2.9's offline story means the page
    * must open and plan a run with no network reachable at all.
    */
+  /**
+   * Step 6.3: download the .py of a run that need not be the one on screen.
+   * Built through planner.build, which answers for that run alone, so the
+   * page's own run, path and Python are left exactly as they were. Same rule
+   * as Download .py: a run with an error gets no file -- one that drives
+   * somewhere other than the plan is worse than none.
+   */
+  async function downloadPython(saved: Run, from: string) {
+    const { run, notes } = upgradeRun(saved);
+    const problem = nameProblem(run.name);
+
+    if (problem !== null) {
+      log(`cannot save ${from}: "${run.name}" will not work as a file name -- ${problem}`);
+      return;
+    }
+
+    log(`building ${from} to download…`);
+
+    let result: BuildResult;
+
+    try {
+      result = (await planner.build(run)).result;
+    } catch (error) {
+      log(`could not build ${from}: ${error instanceof Error ? error.message : error}`);
+      return;
+    }
+
+    if (!result.ok || result.module_text === null) {
+      log(`${from} has a problem that has to be fixed before it can be saved:`);
+
+      for (const trouble of result.diagnostics.filter((d) => d.level === "error")) {
+        log(`  ${trouble.step === null ? "" : `step ${trouble.step + 1}: `}${trouble.message}`);
+      }
+
+      return;
+    }
+
+    saveModule(run.name, result.module_text);
+    notes.forEach((note) => log(`  ${note}`));
+    log(`saved ${run.name}.py from ${from} — upload it at code.pybricks.com`);
+  }
+
   // which click on "All saved runs" is the newest -- see its handler below
   let opening = 0;
 
@@ -661,7 +709,27 @@ async function main() {
         loadNotes = [`opened "${entry.name}" (${entry.owner})`, ...loadNotes];
       });
 
-      item.append(button);
+      const python = document.createElement("button");
+      python.type = "button";
+      python.className = "py";
+      python.textContent = ".py";
+      python.title = `download ${entry.owner}'s ${entry.name}.py without opening it`;
+
+      python.addEventListener("click", async () => {
+        python.disabled = true;
+
+        const run = await openRemote(entry.owner, entry.name);
+
+        if (run === null) {
+          log(`could not fetch "${entry.name}" (${entry.owner})`);
+        } else {
+          await downloadPython(run, `"${entry.name}" (${entry.owner})`);
+        }
+
+        python.disabled = false;
+      });
+
+      item.append(button, python);
       allSavedList.append(item);
     }
   }
@@ -782,6 +850,7 @@ async function main() {
     void refreshSavedList();
     savedList.value = nameBox.value;
     forgetButton.disabled = false;
+    savedPyButton.disabled = false;
 
     // Best-effort on top of the local save above, not instead of it -- see
     // store.ts. A team member who typed no name just keeps a local-only run.
@@ -806,6 +875,8 @@ async function main() {
     const name = savedList.value;
 
     forgetButton.disabled = name === "";
+
+    savedPyButton.disabled = name === "";
 
     if (name === "") {
       return;
@@ -836,6 +907,33 @@ async function main() {
       loadRun(run);
       log(`opened "${name}" from another laptop`);
     });
+  });
+
+  savedPyButton.addEventListener("click", async () => {
+    const name = savedList.value;
+
+    if (name === "") {
+      return;
+    }
+
+    // local first, as opening it does; otherwise one of listRemote()'s
+    // "from another laptop" entries, fetched under the owner box's name
+    const local = listSaved().find((entry) => entry.name === name);
+    const owner = ownerBox.value.trim();
+
+    savedPyButton.disabled = true;
+
+    const run = local !== undefined ? local.run
+      : owner === "" ? null
+      : await openRemote(owner, name);
+
+    if (run === null) {
+      log(`could not fetch "${name}"`);
+    } else {
+      await downloadPython(run, `"${name}"`);
+    }
+
+    savedPyButton.disabled = savedList.value === "";
   });
 
   forgetButton.addEventListener("click", () => {
@@ -977,7 +1075,14 @@ async function main() {
   const { python, seconds: ready } = await planner.ready;
   log(`python ${python} ready in ${ready}s`);
 
-  show((await planner.build(currentRun())).result);
+  // a run opened while Python was starting has its own build coming, and
+  // this one -- of the run that was on screen before -- must not land on it
+  const loadsBefore = loads;
+  const first = (await planner.build(currentRun())).result;
+
+  if (loads === loadsBefore) {
+    show(first);
+  }
 }
 
 /**

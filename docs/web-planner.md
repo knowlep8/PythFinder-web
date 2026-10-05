@@ -2363,12 +2363,31 @@ partway through a turn.
   `run_a` still had a 4.5 from/to limit, which 6.1's `upgradeRun` converted
   on open.
 
-- [ ] **6.3 Download the Python for any saved run.** A ".py" button beside
+- [x] **6.3 Download the Python for any saved run.** A ".py" button beside
   each entry in "All saved runs" (and for the selected run in the "saved
   runs" dropdown): fetch the run, build it with `planner.build(run)` —
   which answers for that one run without touching what is on screen — and
   save its `module_text` as `<name>.py` via `saveModule`. Same rule as the
   main Download: if the build has errors, log them and save nothing.
+
+  **Done 2026-10-05.** `downloadPython` in `main.ts` runs the fetched run
+  through `upgradeRun` first, so an old run's limit converts the same way
+  it does when opened. A run whose name is not a Python identifier is
+  refused, since the hub imports the file by name. `planner.build()` no
+  longer makes itself "the newest": it is answered through its own promise
+  anyway, and marking itself newest meant a download would drop the page's
+  own pending build undrawn. The startup build, the only other caller, is
+  now skipped if a run was opened while Python was starting, for the same
+  reason as 6.2's `forget()`. In the "saved runs" row, picking a run opens
+  it (as before), so the `.py` there mostly saves an extra click.
+
+  Checked in the browser (`vite preview` of a fresh build, read-only against
+  the shared store; the download link was intercepted in the page so no
+  files were saved): `.py` on Joey's `run_a` produced `run_a.py` with the
+  converted limit noted in the log, and the page's own run, name, Python
+  and owner box were unchanged. Editing the page and then pressing `.py` on
+  Lyla's run within 200ms still drew the edit. A local run with an error
+  logged the error against its step and produced no file.
 
 ---
 

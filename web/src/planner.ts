@@ -153,9 +153,12 @@ export function createPlanner(
   return {
     ready,
 
+    // Step 6.3: this no longer makes itself "the newest" -- it is answered
+    // through its own promise either way, and the page now builds runs that
+    // are not on screen (a saved run's .py), which must not make the page's
+    // own background build count as stale and go undrawn.
     build(run) {
       const id = nextId++;
-      newestId = id;
 
       return new Promise((resolve, reject) => {
         answers.set(id, resolve);
